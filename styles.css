@@ -7302,6 +7302,24 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
         padding: 0.4rem 0.5rem;
         font-size: 0.75rem;
     }
+
+    .profile-content-grid {
+        grid-template-columns: 1fr;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .profile-sidebar,
+    .profile-main {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .profile-box {
+        max-width: 100%;
+        min-width: 0;
+    }
 }
 
 @media (max-width: 480px) {
