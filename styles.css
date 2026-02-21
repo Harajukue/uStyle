@@ -6155,6 +6155,7 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 
 #profilePage {
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 0;
 }
 
