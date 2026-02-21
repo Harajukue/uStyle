@@ -1856,6 +1856,7 @@ body {
     z-index: 10;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
 }
 
 .gallery-nav:hover {
@@ -3016,9 +3017,10 @@ body {
         z-index: 2000;
     }
 
-    /* Modal */
+    /* Modal — must sit above .mobile-detail-overlay (z-index: 1700) */
     .modal-overlay {
         padding-bottom: 75px;
+        z-index: 1800;
     }
 
     .modal-dialog {
@@ -7206,6 +7208,11 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 @media (max-width: 768px) {
     .profile-container {
         padding: 1rem;
+        overflow-x: hidden;
+    }
+
+    .profile-banner {
+        height: 160px;
     }
 
     .profile-top {
@@ -7213,34 +7220,38 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
         align-items: center;
         text-align: center;
         padding: 0 1rem 1.5rem;
-        margin-top: -40px;
+        margin-top: -30px;
     }
 
     .profile-pic {
-        width: 120px;
-        height: 120px;
+        width: 110px;
+        height: 110px;
     }
 
     .profile-info {
         padding-top: 0;
+        width: 100%;
     }
 
     .profile-name {
-        font-size: 1.5rem;
+        font-size: 1.4rem;
     }
 
     .profile-stats {
         justify-content: center;
-        gap: 1rem;
+        gap: 0.6rem;
+        flex-wrap: wrap;
     }
 
     .stat-box {
-        min-width: 80px;
-        padding: 0.75rem;
+        min-width: 70px;
+        padding: 0.6rem 0.5rem;
+        flex: 1 1 70px;
+        max-width: calc(50% - 0.3rem);
     }
 
     .stat-num {
-        font-size: 1.25rem;
+        font-size: 1.1rem;
     }
 
     .edit-profile-btn {
@@ -7263,7 +7274,7 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 
 @media (max-width: 480px) {
     .profile-banner {
-        height: 150px;
+        height: 130px;
     }
 
     .mood-selector {
