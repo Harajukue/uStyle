@@ -7208,6 +7208,13 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 @media (max-width: 768px) {
     .profile-container {
         padding: 0.75rem;
+        overflow-x: hidden;
+        max-width: 100%;
+    }
+
+    .profile-header {
+        overflow: hidden;
+        max-width: 100%;
     }
 
     .profile-banner {
@@ -7215,11 +7222,12 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
     }
 
     .profile-top {
-        flex-direction: column;
+        flex-direction: column !important;
         align-items: center;
         text-align: center;
         padding: 0 1rem 1.25rem;
         margin-top: -40px;
+        max-width: 100%;
     }
 
     .profile-pic {
