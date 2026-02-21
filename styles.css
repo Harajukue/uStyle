@@ -7207,57 +7207,77 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 /* Responsive - Mobile */
 @media (max-width: 768px) {
     .profile-container {
-        padding: 1rem;
-        overflow-x: hidden;
+        padding: 0.75rem;
     }
 
     .profile-banner {
-        height: 160px;
+        height: 140px;
     }
 
     .profile-top {
         flex-direction: column;
         align-items: center;
         text-align: center;
-        padding: 0 1rem 1.5rem;
-        margin-top: -30px;
+        padding: 0 1rem 1.25rem;
+        margin-top: -40px;
     }
 
     .profile-pic {
-        width: 110px;
-        height: 110px;
+        width: 90px;
+        height: 90px;
     }
 
     .profile-info {
-        padding-top: 0;
+        padding-top: 0.5rem;
         width: 100%;
     }
 
     .profile-name {
-        font-size: 1.4rem;
+        font-size: 1.25rem;
+    }
+
+    .profile-status {
+        font-size: 0.9rem;
+        margin-bottom: 0.75rem;
     }
 
     .profile-stats {
         justify-content: center;
-        gap: 0.6rem;
+        gap: 0.5rem;
         flex-wrap: wrap;
     }
 
     .stat-box {
-        min-width: 70px;
-        padding: 0.6rem 0.5rem;
-        flex: 1 1 70px;
-        max-width: calc(50% - 0.3rem);
+        min-width: 0;
+        padding: 0.5rem 0.65rem;
+    }
+
+    .stat-label {
+        font-size: 0.65rem;
     }
 
     .stat-num {
-        font-size: 1.1rem;
+        font-size: 1rem;
     }
 
     .edit-profile-btn {
         position: static;
         width: 100%;
-        margin-top: 1rem;
+        margin-top: 0.75rem;
+        padding: 0.6rem 1rem;
+        font-size: 0.8rem;
+    }
+
+    .box-header {
+        padding: 0.875rem 1rem;
+    }
+
+    .box-header h3 {
+        font-size: 0.9rem;
+    }
+
+    .box-content {
+        padding: 1rem;
     }
 
     .box-tabs {
@@ -7268,13 +7288,15 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
     .box-tab {
         text-align: center;
         flex: 1;
-        min-width: 120px;
+        min-width: 0;
+        padding: 0.4rem 0.5rem;
+        font-size: 0.75rem;
     }
 }
 
 @media (max-width: 480px) {
     .profile-banner {
-        height: 130px;
+        height: 110px;
     }
 
     .mood-selector {
