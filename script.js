@@ -1221,9 +1221,18 @@ function openDetailView(id) {
             `;
             
             mobileDetailOverlay.classList.add('active');
+
+            // Attach listeners to this overlay's gallery nav buttons
+            // (innerHTML copy doesn't carry over addEventListener)
+            setTimeout(() => {
+                const overlayPrev = mobileDetailOverlay.querySelector('.gallery-nav.prev');
+                const overlayNext = mobileDetailOverlay.querySelector('.gallery-nav.next');
+                if (overlayPrev) overlayPrev.addEventListener('click', prevImage);
+                if (overlayNext) overlayNext.addEventListener('click', nextImage);
+            }, 0);
         }
     }
-    
+
     renderList();
 }
 
@@ -1268,13 +1277,24 @@ function nextImage() {
 function updateGalleryImage() {
     const img = document.getElementById('galleryImage');
     const counter = document.getElementById('imageCounter');
-    
+
     if (img) {
         img.src = state.selectedEntry.images[state.currentImageIndex];
     }
-    
+
     if (counter) {
         counter.textContent = state.currentImageIndex + 1;
+    }
+
+    // Also update the mobile overlay copy (getElementById finds the hidden desktop one first)
+    if (window.innerWidth <= 1024) {
+        const mobileDetailOverlay = document.getElementById('mobileDetailOverlay');
+        if (mobileDetailOverlay && mobileDetailOverlay.classList.contains('active')) {
+            const mobileImg = mobileDetailOverlay.querySelector('.gallery-image');
+            const mobileCounter = mobileDetailOverlay.querySelector('#imageCounter');
+            if (mobileImg) mobileImg.src = state.selectedEntry.images[state.currentImageIndex];
+            if (mobileCounter) mobileCounter.textContent = state.currentImageIndex + 1;
+        }
     }
 }
 
@@ -1355,6 +1375,7 @@ function openModal(mode, entry = null) {
     
     renderImageGrid();
     dom.modalOverlay.classList.remove('hidden');
+    if (window.innerWidth <= 1024) dom.modalOverlay.style.zIndex = '1800';
 }
 
 function closeModal() {
@@ -2637,6 +2658,14 @@ function openClosetDetailView(itemId) {
                 </div>
             `;
             mobileDetailOverlay.classList.add('active');
+
+            // Attach listeners to this overlay's gallery nav buttons
+            setTimeout(() => {
+                const overlayPrev = mobileDetailOverlay.querySelector('.gallery-nav.prev');
+                const overlayNext = mobileDetailOverlay.querySelector('.gallery-nav.next');
+                if (overlayPrev) overlayPrev.addEventListener('click', prevClosetImage);
+                if (overlayNext) overlayNext.addEventListener('click', nextClosetImage);
+            }, 0);
         }
     }
 
@@ -2798,6 +2827,21 @@ function renderClosetDetail(item) {
             nextBtn.removeEventListener('click', nextClosetImage);
             nextBtn.addEventListener('click', nextClosetImage);
         }
+
+        // Sync mobile overlay content and attach listeners to its buttons
+        if (window.innerWidth <= 1024) {
+            const mobileDetailOverlay = document.getElementById('mobileDetailOverlay');
+            if (mobileDetailOverlay && mobileDetailOverlay.classList.contains('active')) {
+                const mobileContent = mobileDetailOverlay.querySelector('.mobile-detail-content');
+                if (mobileContent) {
+                    mobileContent.innerHTML = dom.detailContent.innerHTML;
+                    const overlayPrev = mobileContent.querySelector('.gallery-nav.prev');
+                    const overlayNext = mobileContent.querySelector('.gallery-nav.next');
+                    if (overlayPrev) overlayPrev.addEventListener('click', prevClosetImage);
+                    if (overlayNext) overlayNext.addEventListener('click', nextClosetImage);
+                }
+            }
+        }
     }, 0);
 }
 
@@ -2940,6 +2984,7 @@ function openClosetModal(itemId = null) {
     if (dom.closetSaveSuccess) dom.closetSaveSuccess.classList.add('hidden');
 
     dom.closetModalOverlay.classList.remove('hidden');
+    if (window.innerWidth <= 1024) dom.closetModalOverlay.style.zIndex = '1800';
 }
 
 // Populate closet form with item data
