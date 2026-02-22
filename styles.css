@@ -2989,6 +2989,41 @@ body {
     .app-page {
         width: 100% !important;
         max-width: 100% !important;
+        overflow-x: hidden !important;
+    }
+
+    #profilePage {
+        overflow-x: hidden !important;
+    }
+
+    .profile-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important;
+        box-sizing: border-box !important;
+    }
+
+    .profile-content-grid {
+        grid-template-columns: 1fr !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important;
+        box-sizing: border-box !important;
+    }
+
+    .profile-sidebar,
+    .profile-main {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow-x: hidden !important;
+    }
+
+    .profile-box {
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow-x: hidden !important;
+        box-sizing: border-box !important;
     }
 
     .view-mode-toggle {
