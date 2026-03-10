@@ -476,6 +476,7 @@ async function showApp() {
     initProfileListeners(); // Initialize profile listeners
     initSocialListeners(); // Initialize social listeners
     initFeedbackListeners(); // Initialize feedback panel
+    initAIStylist(); // Initialize AI Stylist
     updateAll();
     updateClosetCounts(); // Initialize closet counts
     renderDraftsList();
@@ -5116,6 +5117,113 @@ window.viewSocialClosetItem = viewSocialClosetItem;
 window.closeSocialDetailModal = closeSocialDetailModal;
 window.showProfileEntryModal = showProfileEntryModal;
 window.showProfileClosetModal = showProfileClosetModal;
+
+// ============================================================================
+// AI STYLIST
+// ============================================================================
+
+function initAIStylist() {
+    const btn       = document.getElementById('aiStylistBtn');
+    const overlay   = document.getElementById('aiStylistOverlay');
+    const closeBtn  = document.getElementById('aiStylistClose');
+    const submitBtn = document.getElementById('aiStylistSubmit');
+    const tryAgain  = document.getElementById('aiTryAgain');
+
+    if (!btn) return;
+
+    btn.addEventListener('click', openAIStylist);
+    closeBtn.addEventListener('click', closeAIStylist);
+    submitBtn.addEventListener('click', handleAIStylistSubmit);
+    tryAgain.addEventListener('click', resetAIStylist);
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeAIStylist();
+    });
+}
+
+function openAIStylist() {
+    const overlay    = document.getElementById('aiStylistOverlay');
+    const countEl    = document.getElementById('aiClosetCount');
+    const itemCount  = state.closetItems.length;
+
+    countEl.textContent = itemCount > 0
+        ? `Using ${itemCount} item${itemCount !== 1 ? 's' : ''} from your closet`
+        : 'No closet items — AI will suggest general outfits';
+
+    overlay.classList.remove('hidden');
+    document.getElementById('aiOccasion').focus();
+}
+
+function closeAIStylist() {
+    document.getElementById('aiStylistOverlay').classList.add('hidden');
+    resetAIStylist();
+}
+
+function resetAIStylist() {
+    document.getElementById('aiResult').classList.add('hidden');
+    document.getElementById('aiStylistForm').classList.remove('hidden');
+    document.getElementById('aiOccasion').value = '';
+    document.getElementById('aiMood').value = '';
+}
+
+async function handleAIStylistSubmit() {
+    const occasion   = document.getElementById('aiOccasion').value.trim();
+    const mood       = document.getElementById('aiMood').value.trim();
+    const submitBtn  = document.getElementById('aiStylistSubmit');
+    const submitText = document.getElementById('aiSubmitText');
+    const loader     = document.getElementById('aiSubmitLoader');
+
+    if (!occasion && !mood) {
+        showToast('Add an occasion or mood to get started', 'info');
+        return;
+    }
+
+    // Loading state
+    submitBtn.disabled = true;
+    submitText.classList.add('hidden');
+    loader.classList.remove('hidden');
+
+    try {
+        // Slim down closet items to just what Claude needs
+        const closetPayload = state.closetItems.map(item => ({
+            name:      item.name,
+            item_type: item.item_type,
+            color:     item.color,
+            style:     item.style,
+        }));
+
+        const { data, error } = await supabaseClient.functions.invoke('suggest-outfit', {
+            body: { closetItems: closetPayload, occasion, mood }
+        });
+
+        if (error) throw new Error(error.message);
+        if (data.error) throw new Error(data.error);
+
+        showAIResult(data.suggestion);
+
+    } catch (err) {
+        showToast('AI Stylist error: ' + err.message, 'error');
+    } finally {
+        submitBtn.disabled = false;
+        submitText.classList.remove('hidden');
+        loader.classList.add('hidden');
+    }
+}
+
+function showAIResult(text) {
+    const resultEl = document.getElementById('aiResult');
+    const bodyEl   = document.getElementById('aiResultBody');
+
+    // Convert **bold** markdown to <strong> and newlines to <br>
+    const formatted = text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+
+    bodyEl.innerHTML = formatted;
+
+    document.getElementById('aiStylistForm').classList.add('hidden');
+    resultEl.classList.remove('hidden');
+}
 
 // ============================================================================
 // START APPLICATION

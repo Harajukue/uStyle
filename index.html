@@ -6,7 +6,7 @@
     <title>FashionDex</title>
     <link rel="stylesheet" href="styles.css?v=9">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-</head>
+</head> 
 <body>
     <!-- Login Screen -->
     <div class="login-screen" id="loginScreen">
@@ -350,6 +350,15 @@
                                 <span class="btn-glow"></span>
                                 <span class="btn-icon">+</span>
                                 <span class="btn-text">Add Item</span>
+                            </button>
+                        </div>
+
+                        <!-- AI Stylist Button -->
+                        <div class="ai-stylist-fab">
+                            <button class="ai-stylist-btn" id="aiStylistBtn">
+                                <span class="btn-glow"></span>
+                                <span class="ai-btn-icon">✦</span>
+                                <span class="btn-text">AI Stylist</span>
                             </button>
                         </div>
                     </div>
@@ -1128,6 +1137,43 @@
                 <button class="modal-close" onclick="closeSocialDetailModal()">×</button>
             </div>
             <div class="modal-body" id="socialDetailBody"></div>
+        </div>
+    </div>
+
+    <!-- AI Stylist Modal -->
+    <div class="modal-overlay hidden" id="aiStylistOverlay">
+        <div class="ai-stylist-modal">
+            <div class="modal-header">
+                <h3 class="modal-title"><span class="ai-title-icon">✦</span> AI Stylist</h3>
+                <button class="modal-close" id="aiStylistClose">×</button>
+            </div>
+
+            <div class="ai-stylist-form" id="aiStylistForm">
+                <div class="form-field">
+                    <label class="form-label">What's the occasion?</label>
+                    <input type="text" class="form-input" id="aiOccasion" placeholder="e.g. date night, job interview, weekend brunch...">
+                </div>
+                <div class="form-field">
+                    <label class="form-label">Mood / vibe?</label>
+                    <input type="text" class="form-input" id="aiMood" placeholder="e.g. minimalist, bold, cozy, elevated casual...">
+                </div>
+                <div class="ai-closet-note" id="aiClosetNote">
+                    <span class="note-icon">👔</span>
+                    <span id="aiClosetCount">Loading closet...</span>
+                </div>
+                <button class="ai-submit-btn" id="aiStylistSubmit">
+                    <span id="aiSubmitText">Generate Outfits</span>
+                    <span id="aiSubmitLoader" class="loader hidden"></span>
+                </button>
+            </div>
+
+            <div class="ai-result hidden" id="aiResult">
+                <div class="ai-result-header">
+                    <span class="ai-result-label">✦ Suggested Outfits</span>
+                    <button class="ai-try-again-btn" id="aiTryAgain">Try Again</button>
+                </div>
+                <div class="ai-result-body" id="aiResultBody"></div>
+            </div>
         </div>
     </div>
 
