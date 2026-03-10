@@ -7894,34 +7894,71 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 }
 
 /* ============================================================================
+   AI FILL BUTTON
+   ============================================================================ */
+
+.ai-fill-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    width: 100%;
+    margin-top: 0.6rem;
+    padding: 0.55rem 1rem;
+    background: linear-gradient(135deg, rgba(42, 26, 74, 0.6) 0%, rgba(61, 32, 128, 0.6) 100%);
+    border: 1px solid rgba(124, 77, 255, 0.5);
+    border-radius: var(--radius-md);
+    color: #c9b8ff;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+.ai-fill-btn:hover:not(:disabled) {
+    border-color: #7c4dff;
+    background: linear-gradient(135deg, rgba(42, 26, 74, 0.9) 0%, rgba(61, 32, 128, 0.9) 100%);
+    box-shadow: 0 0 16px rgba(124, 77, 255, 0.35);
+    color: #e8e0ff;
+}
+
+.ai-fill-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ============================================================================
    AI STYLIST
    ============================================================================ */
 
 .ai-stylist-fab {
-    display: flex;
-    align-items: center;
+    margin-top: 0.75rem;
 }
 
 .ai-stylist-btn {
+    width: 100%;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
-    padding: 0.6rem 1rem;
+    padding: 1rem;
     background: linear-gradient(135deg, #2a1a4a 0%, #3d2080 100%);
     border: 2px solid #7c4dff;
     border-radius: var(--radius-md);
     color: #c9b8ff;
     font-family: inherit;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1.5px;
+    letter-spacing: 2px;
     cursor: pointer;
     position: relative;
     overflow: hidden;
     transition: all 0.3s ease;
     box-shadow: 0 0 16px rgba(124, 77, 255, 0.35);
-    white-space: nowrap;
 }
 
 .ai-stylist-btn:hover {
@@ -8085,11 +8122,29 @@ body[data-theme="console"] .bottom-nav-btn.active::after {
 }
 
 @media (max-width: 768px) {
+    .ai-stylist-fab {
+        position: fixed;
+        bottom: 144px; /* sits below the add item FAB at 80px */
+        right: 16px;
+        z-index: 100;
+        margin: 0;
+    }
+
+    .ai-stylist-btn {
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        padding: 0;
+        justify-content: center;
+        box-shadow: 0 4px 20px rgba(124, 77, 255, 0.6);
+        letter-spacing: 0;
+    }
+
     .ai-stylist-btn .btn-text {
         display: none;
     }
 
-    .ai-stylist-btn {
-        padding: 0.6rem 0.75rem;
+    .ai-btn-icon {
+        font-size: 1.4rem;
     }
 }

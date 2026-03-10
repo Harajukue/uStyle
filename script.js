@@ -476,6 +476,7 @@ async function showApp() {
     initProfileListeners(); // Initialize profile listeners
     initSocialListeners(); // Initialize social listeners
     initFeedbackListeners(); // Initialize feedback panel
+    initAIFill();    // Initialize AI image fill
     initAIStylist(); // Initialize AI Stylist
     updateAll();
     updateClosetCounts(); // Initialize closet counts
@@ -5117,6 +5118,139 @@ window.viewSocialClosetItem = viewSocialClosetItem;
 window.closeSocialDetailModal = closeSocialDetailModal;
 window.showProfileEntryModal = showProfileEntryModal;
 window.showProfileClosetModal = showProfileClosetModal;
+
+// ============================================================================
+// AI IMAGE FILL
+// ============================================================================
+
+function initAIFill() {
+    const entryBtn = document.getElementById('aiFillEntryBtn');
+    const closetBtn = document.getElementById('aiFillClosetBtn');
+    if (entryBtn)  entryBtn.addEventListener('click',  () => handleAIFill('database'));
+    if (closetBtn) closetBtn.addEventListener('click', () => handleAIFill('closet'));
+}
+
+async function handleAIFill(mode) {
+    // Pick the right image source and button elements
+    const isCloset    = mode === 'closet';
+    const imageFiles  = isCloset ? state.closetUploadedImageFiles : state.uploadedImageFiles;
+    const imageUrls   = isCloset ? state.closetUploadedImages     : state.uploadedImages;
+    const btnText     = document.getElementById(isCloset ? 'aiFillClosetText'   : 'aiFillEntryText');
+    const btnLoader   = document.getElementById(isCloset ? 'aiFillClosetLoader' : 'aiFillEntryLoader');
+    const btn         = document.getElementById(isCloset ? 'aiFillClosetBtn'    : 'aiFillEntryBtn');
+    const nameField   = document.getElementById(isCloset ? 'closetItemName'     : 'entryName');
+
+    // Need at least one image
+    const hasFile = imageFiles && imageFiles.length > 0;
+    const hasUrl  = imageUrls  && imageUrls.length  > 0;
+    if (!hasFile && !hasUrl) {
+        showToast('Upload an image first so AI can analyze it', 'info');
+        return;
+    }
+
+    btn.disabled = true;
+    btnText.classList.add('hidden');
+    btnLoader.classList.remove('hidden');
+
+    try {
+        let imageBase64, mediaType;
+
+        if (hasFile) {
+            // Newly uploaded file — convert to base64
+            const file = imageFiles[0];
+            mediaType  = file.type || 'image/jpeg';
+            imageBase64 = await fileToBase64(file);
+        } else {
+            // Already-saved URL — fetch and convert
+            const res  = await fetch(imageUrls[0]);
+            const blob = await res.blob();
+            mediaType  = blob.type || 'image/jpeg';
+            imageBase64 = await blobToBase64(blob);
+        }
+
+        const name = nameField ? nameField.value.trim() : '';
+
+        const { data, error } = await supabaseClient.functions.invoke('analyze-clothing', {
+            body: { imageBase64, mediaType, name, mode }
+        });
+
+        if (error) throw new Error(error.message);
+        if (data.error) throw new Error(data.error);
+
+        if (mode === 'database') applyAIFillDatabase(data.result);
+        else                     applyAIFillCloset(data.result);
+
+        showToast('Fields filled by AI — review and adjust as needed', 'success');
+
+    } catch (err) {
+        showToast('AI Fill error: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btnText.classList.remove('hidden');
+        btnLoader.classList.add('hidden');
+    }
+}
+
+function applyAIFillDatabase(result) {
+    if (result.description) document.getElementById('entryDescription').value  = result.description;
+    if (result.influence)   document.getElementById('entryInfluence').value    = result.influence;
+    if (result.techniques)  document.getElementById('entryTechniques').value   = result.techniques;
+    if (result.tags?.length) {
+        document.getElementById('entryTags').value = result.tags.join(', ');
+    }
+    // Fill dynamic fields if they exist in the DOM
+    const fields = ['designer', 'house', 'year', 'season'];
+    fields.forEach(field => {
+        const el = document.getElementById(field);
+        if (el && result[field]) el.value = result[field];
+    });
+}
+
+function applyAIFillCloset(result) {
+    if (result.description)  document.getElementById('closetItemDescription').value  = result.description;
+    if (result.color)        document.getElementById('closetItemColor').value        = result.color;
+    if (result.brand)        document.getElementById('closetItemBrand').value        = result.brand;
+    if (result.subcategory)  document.getElementById('closetItemSubcategory').value  = result.subcategory;
+    if (result.tags?.length) document.getElementById('closetItemTags').value         = result.tags.join(', ');
+
+    // Auto-select the category tile if Claude identified one
+    if (result.category) {
+        const matchCard = document.querySelector(`#closetTypeGrid .type-card[data-closet-type="${result.category}"]`);
+        if (matchCard) {
+            document.querySelectorAll('#closetTypeGrid .type-card').forEach(c => c.classList.remove('selected'));
+            matchCard.classList.add('selected');
+            dom.closetItemCategory.value = result.category;
+
+            // Expand details section so user can see filled fields
+            if (dom.closetDetailsSection) dom.closetDetailsSection.classList.remove('collapsed');
+            if (dom.closetDetailsToggle) {
+                dom.closetDetailsToggle.classList.add('expanded');
+                const t = dom.closetDetailsToggle.querySelector('.toggle-text');
+                if (t) t.textContent = 'Less Details';
+            }
+        }
+    }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
 
 // ============================================================================
 // AI STYLIST
