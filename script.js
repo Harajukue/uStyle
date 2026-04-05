@@ -294,10 +294,11 @@ async function handleGoogleSignIn() {
     try {
         showToast('Redirecting to Google...', 'info');
         
+        const isNativeApp = navigator.userAgent.includes('uStyleApp');
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: window.location.origin
+                redirectTo: isNativeApp ? 'ustyle://login-callback' : window.location.origin
             }
         });
         
@@ -365,7 +366,7 @@ async function handleAuthSuccess(session) {
     try {
         const { data: profile, error } = await supabase
             .from('user_profiles')
-            .select('username, role, theme')  // ✅ Use username and role, not name and user_status
+            .select('username, role, theme, can_contribute')
             .eq('id', session.user.id)
             .single();
         
@@ -382,10 +383,9 @@ async function handleAuthSuccess(session) {
             username: profile?.username || session.user.email.split('@')[0],  // ✅ Use username
             avatar: session.user.user_metadata?.avatar_url ||
                     session.user.user_metadata?.picture,
-            role: profile?.role || 'unverified',  // ✅ Use role
-            canEdit: profile?.role === 'admin' ||
-                     profile?.role === 'verified' ||
-                     profile?.role === 'member'
+            role: profile?.role || 'unverified',
+            canContribute: profile?.role === 'admin' || profile?.can_contribute === true,
+            canEdit: profile?.role === 'admin' || profile?.can_contribute === true
         };
 
         await showApp();
@@ -476,8 +476,10 @@ async function showApp() {
     initProfileListeners(); // Initialize profile listeners
     initSocialListeners(); // Initialize social listeners
     initFeedbackListeners(); // Initialize feedback panel
-    initAIFill();    // Initialize AI image fill
-    initAIStylist(); // Initialize AI Stylist
+    initAIFill();      // Initialize AI image fill
+    initStyleMatch();  // Initialize Style Match
+    initAIStylist();   // Initialize AI Stylist
+    initMembership();  // Initialize membership gating
     updateAll();
     updateClosetCounts(); // Initialize closet counts
     renderDraftsList();
@@ -1007,6 +1009,7 @@ function renderList() {
                                 <div class="item-type-overlay">${entry.type}</div>
                             </div>
                         `}
+                        ${entry.created_by ? `<div class="item-submitter">by ${entry.created_by}</div>` : ''}
                     </div>
                 </div>
             </div>
@@ -4749,12 +4752,38 @@ function showUserProfileModal(profile, entries, closetItems) {
         </div>
     ` : '';
 
+    const isAdmin = state.user?.role === 'admin';
+    const isOwnProfile = profile.id === state.user?.id;
+    const profileRole = profile.role || 'unverified';
+    const isMemberNow = ['member', 'verified', 'admin'].includes(profileRole);
+
+    const canContributeNow = profile.can_contribute === true || profile.role === 'admin';
+
+    const adminControlsHtml = (isAdmin && !isOwnProfile) ? `
+        <div class="admin-controls-row">
+            <button
+                class="admin-grant-btn${isMemberNow ? ' revoke' : ''}"
+                onclick="grantMembership('${profile.id}', '${isMemberNow ? 'unverified' : 'member'}', this)">
+                ${isMemberNow ? '✕ Revoke AI Access' : '✦ Grant AI Access'}
+            </button>
+            <button
+                class="admin-grant-btn${canContributeNow ? ' revoke' : ''}"
+                id="dbAccessBtn_${profile.id}"
+                onclick="toggleDbAccess('${profile.id}', ${canContributeNow}, this)">
+                ${canContributeNow ? '✕ Revoke DB Access' : '+ Enable DB Contributions'}
+            </button>
+        </div>
+    ` : '';
+
     content.innerHTML = `
         ${bannerHtml}
         <div class="vp-identity">
             <div class="vp-avatar-wrap">${avatarHtml}</div>
             <div class="vp-name-block">
-                <div class="vp-display-name">${profile.display_name || 'Fashion Enthusiast'}</div>
+                <div class="vp-display-name">
+                    ${profile.display_name || 'Fashion Enthusiast'}
+                    ${isAdmin ? `<span id="vpRoleBadge" class="vp-role-badge ${profileRole}">${profileRole}</span>` : ''}
+                </div>
                 ${profile.username ? `<div class="vp-username">@${profile.username}</div>` : ''}
                 ${profile.status ? `<div class="vp-status-line">${profile.status}</div>` : ''}
                 ${profile.mood_emoji ? `<div class="vp-mood-badge">${profile.mood_emoji}${profile.mood_text ? ' ' + profile.mood_text : ''}</div>` : ''}
@@ -4777,6 +4806,8 @@ function showUserProfileModal(profile, entries, closetItems) {
                 <div class="vp-stat-label">Member Since</div>
             </div>
         </div>
+
+        ${adminControlsHtml}
 
         ${(profile.bio || profile.interests || profile.favorite_designers) ? `
             <div class="vp-about-section">
@@ -5169,9 +5200,10 @@ async function handleAIFill(mode) {
         }
 
         const name = nameField ? nameField.value.trim() : '';
+        const entryType = mode === 'database' ? (document.getElementById('entryType')?.value || '') : '';
 
         const { data, error } = await supabaseClient.functions.invoke('analyze-clothing', {
-            body: { imageBase64, mediaType, name, mode }
+            body: { imageBase64, mediaType, name, mode, entryType }
         });
 
         if (error) throw new Error(error.message);
@@ -5198,9 +5230,9 @@ function applyAIFillDatabase(result) {
     if (result.tags?.length) {
         document.getElementById('entryTags').value = result.tags.join(', ');
     }
-    // Fill dynamic fields if they exist in the DOM
-    const fields = ['designer', 'house', 'year', 'season'];
-    fields.forEach(field => {
+    // Fill any dynamic fields that exist in the DOM for the current entry type
+    const dynamicFields = ['designer', 'house', 'year', 'season', 'nationality', 'born', 'died', 'founded', 'founder', 'location', 'theme'];
+    dynamicFields.forEach(field => {
         const el = document.getElementById(field);
         if (el && result[field]) el.value = result[field];
     });
@@ -5250,6 +5282,177 @@ function blobToBase64(blob) {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
+}
+
+// ============================================================================
+// STYLE MATCH
+// ============================================================================
+
+function initStyleMatch() {
+    const btn       = document.getElementById('styleMatchBtn');
+    const overlay   = document.getElementById('styleMatchOverlay');
+    const closeBtn  = document.getElementById('styleMatchClose');
+    const uploadBtn = document.getElementById('styleMatchUploadBtn');
+    const fileInput = document.getElementById('styleMatchImageInput');
+    const clearImg  = document.getElementById('styleMatchClearImg');
+    const submitBtn = document.getElementById('styleMatchSubmit');
+    const tryAgain  = document.getElementById('styleMatchTryAgain');
+
+    if (!btn) return;
+
+    btn.addEventListener('click', () => overlay.classList.remove('hidden'));
+    closeBtn.addEventListener('click', closeStyleMatch);
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeStyleMatch(); });
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', handleStyleMatchImageSelect);
+    clearImg.addEventListener('click', clearStyleMatchImage);
+    submitBtn.addEventListener('click', handleStyleMatchSubmit);
+    tryAgain.addEventListener('click', resetStyleMatch);
+}
+
+function closeStyleMatch() {
+    document.getElementById('styleMatchOverlay').classList.add('hidden');
+    resetStyleMatch();
+}
+
+function resetStyleMatch() {
+    clearStyleMatchImage();
+    document.getElementById('styleMatchResult').classList.add('hidden');
+    document.getElementById('styleMatchForm').classList.remove('hidden');
+}
+
+function handleStyleMatchImageSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        document.getElementById('styleMatchPreviewImg').src = ev.target.result;
+        document.getElementById('styleMatchPreview').classList.remove('hidden');
+        document.getElementById('styleMatchUploadBtn').classList.add('hidden');
+        document.getElementById('styleMatchSubmit').disabled = false;
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearStyleMatchImage() {
+    const fileInput = document.getElementById('styleMatchImageInput');
+    fileInput.value = '';
+    document.getElementById('styleMatchPreviewImg').src = '';
+    document.getElementById('styleMatchPreview').classList.add('hidden');
+    document.getElementById('styleMatchUploadBtn').classList.remove('hidden');
+    document.getElementById('styleMatchSubmit').disabled = true;
+}
+
+async function handleStyleMatchSubmit() {
+    const fileInput  = document.getElementById('styleMatchImageInput');
+    const submitBtn  = document.getElementById('styleMatchSubmit');
+    const submitText = document.getElementById('styleMatchSubmitText');
+    const loader     = document.getElementById('styleMatchLoader');
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    submitBtn.disabled = true;
+    submitText.classList.add('hidden');
+    loader.classList.remove('hidden');
+
+    try {
+        const imageBase64 = await fileToBase64(file);
+        const mediaType   = file.type || 'image/jpeg';
+
+        const { data, error } = await supabaseClient.functions.invoke('style-match', {
+            body: { imageBase64, mediaType }
+        });
+
+        if (error) throw new Error(error.message);
+        if (data.error) throw new Error(data.error);
+
+        const scored = scoreAllItemsAgainstPieces(data.pieces);
+        renderStyleMatchResults(scored, data.pieces);
+
+    } catch (err) {
+        showToast('AI Image error: ' + err.message, 'error');
+    } finally {
+        submitBtn.disabled = false;
+        submitText.classList.remove('hidden');
+        loader.classList.add('hidden');
+    }
+}
+
+// Score every closet item and database entry against Claude's identified pieces.
+// Returns items sorted by relevance, weak/no matches filtered out.
+function scoreAllItemsAgainstPieces(pieces) {
+    const THRESHOLD = 0.12;
+
+    function scoreItem(item, source) {
+        const itemText = [
+            item.name, item.category, item.color, item.brand,
+            item.type, item.designer, item.subcategory,
+            ...(item.tags || [])
+        ].filter(Boolean).join(' ').toLowerCase();
+
+        let bestScore = 0, bestPiece = null;
+
+        pieces.forEach(p => {
+            const keywords = [...(p.keywords || []), p.category, p.color, p.piece]
+                .filter(Boolean).map(k => k.toLowerCase());
+            if (!keywords.length) return;
+            const score = keywords.filter(k => itemText.includes(k)).length / keywords.length;
+            if (score > bestScore) { bestScore = score; bestPiece = p.piece; }
+        });
+
+        return bestScore >= THRESHOLD ? { item, source, score: bestScore, matchedPiece: bestPiece } : null;
+    }
+
+    return [
+        ...state.closetItems.map(i => scoreItem(i, 'closet')),
+        ...state.entries.map(i => scoreItem(i, 'database')),
+    ].filter(Boolean).sort((a, b) => b.score - a.score);
+}
+
+function renderStyleMatchResults(scored, pieces) {
+    const bodyEl = document.getElementById('styleMatchResultBody');
+
+    if (!scored.length) {
+        bodyEl.innerHTML = `
+            <p class="sm-empty">No close matches in your closet or archive.</p>
+            <div class="sm-pieces-identified">
+                <div class="sm-pieces-label">Pieces identified:</div>
+                ${pieces.map(p => `<span class="sm-piece-tag">${p.piece}${p.color ? ' · ' + p.color : ''}</span>`).join('')}
+            </div>`;
+    } else {
+        bodyEl.innerHTML = scored.map(({ item, source, score, matchedPiece }) => {
+            const img        = item.images?.[0];
+            const name       = item.name || 'Untitled';
+            const meta       = source === 'closet'
+                ? [item.color, item.brand || item.category].filter(Boolean).join(' · ')
+                : [item.type, item.designer || item.house].filter(Boolean).join(' · ');
+            const badgeLabel = source === 'closet' ? 'Closet' : 'Archive';
+            const badgeClass = source === 'closet' ? 'sm-badge-closet' : 'sm-badge-db';
+            const pct        = Math.round(score * 100);
+            const onclick    = source === 'closet'
+                ? `openClosetDetailView('${item.id}')`
+                : `openDetailView(${item.id})`;
+
+            return `
+            <div class="sm-result-card" onclick="${onclick}; closeStyleMatch()">
+                <div class="sm-card-img">
+                    ${img ? `<img src="${img}" alt="${name}" loading="lazy">` : `<div class="sm-card-no-img">📷</div>`}
+                </div>
+                <div class="sm-card-info">
+                    <div class="sm-card-name">${name}</div>
+                    ${meta ? `<div class="sm-card-meta">${meta}</div>` : ''}
+                    <div class="sm-card-match">Matches: <em>${matchedPiece}</em></div>
+                </div>
+                <div class="sm-card-right">
+                    <span class="sm-badge ${badgeClass}">${badgeLabel}</span>
+                    <span class="sm-score">${pct}%</span>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    document.getElementById('styleMatchForm').classList.add('hidden');
+    document.getElementById('styleMatchResult').classList.remove('hidden');
 }
 
 // ============================================================================
@@ -5357,6 +5560,190 @@ function showAIResult(text) {
 
     document.getElementById('aiStylistForm').classList.add('hidden');
     resultEl.classList.remove('hidden');
+}
+
+// ============================================================================
+// MEMBERSHIP & STRIPE
+// ============================================================================
+
+function hasMembership() {
+    return ['admin', 'member', 'verified'].includes(state.user?.role);
+}
+
+function initMembership() {
+    const modal = document.getElementById('upgradeModal');
+    const closeBtn = document.getElementById('upgradeModalClose');
+    const checkoutBtn = document.getElementById('upgradeCheckoutBtn');
+
+    if (!modal) return;
+
+    closeBtn.addEventListener('click', closeUpgradeModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeUpgradeModal(); });
+    checkoutBtn.addEventListener('click', startCheckout);
+
+    // Intercept AI buttons if user is not a member
+    const styleMatchBtn = document.getElementById('styleMatchBtn');
+    const aiStylistBtn  = document.getElementById('aiStylistBtn');
+
+    if (styleMatchBtn) {
+        styleMatchBtn.addEventListener('click', e => {
+            if (!hasMembership()) { e.stopImmediatePropagation(); openUpgradeModal(); }
+        }, true);  // capture phase so it fires before initStyleMatch's listener
+    }
+    if (aiStylistBtn) {
+        aiStylistBtn.addEventListener('click', e => {
+            if (!hasMembership()) { e.stopImmediatePropagation(); openUpgradeModal(); }
+        }, true);
+    }
+
+    // AI Fill buttons
+    const aiFillEntry  = document.getElementById('aiFillEntryBtn');
+    const aiFillCloset = document.getElementById('aiFillClosetBtn');
+    if (aiFillEntry) {
+        aiFillEntry.addEventListener('click', e => {
+            if (!hasMembership()) { e.stopImmediatePropagation(); openUpgradeModal(); }
+        }, true);
+    }
+    if (aiFillCloset) {
+        aiFillCloset.addEventListener('click', e => {
+            if (!hasMembership()) { e.stopImmediatePropagation(); openUpgradeModal(); }
+        }, true);
+    }
+
+    // Show lock indicator on AI buttons when not a member
+    updateMembershipUI();
+}
+
+function updateMembershipUI() {
+    const locked = !hasMembership();
+    const aiButtonIds = ['styleMatchBtn', 'aiStylistBtn', 'aiFillEntryBtn', 'aiFillClosetBtn'];
+    aiButtonIds.forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.classList.toggle('ai-locked', locked);
+    });
+
+    // Handle post-payment redirect
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('membership') === 'success') {
+        showToast('Welcome to FashionDex! Membership activated.', 'success');
+        // Clean up URL
+        window.history.replaceState({}, '', window.location.pathname);
+    } else if (params.get('membership') === 'cancel') {
+        showToast('Checkout cancelled.', 'info');
+        window.history.replaceState({}, '', window.location.pathname);
+    }
+}
+
+function openUpgradeModal() {
+    document.getElementById('upgradeModal').classList.remove('hidden');
+}
+
+function closeUpgradeModal() {
+    document.getElementById('upgradeModal').classList.add('hidden');
+}
+
+async function startCheckout() {
+    const btn = document.getElementById('upgradeCheckoutBtn');
+    btn.disabled = true;
+    btn.textContent = 'Redirecting to Stripe…';
+
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            showToast('Please log in to upgrade', 'error');
+            closeUpgradeModal();
+            return;
+        }
+
+        const res = await supabase.functions.invoke('create-checkout-session', {
+            body: {
+                userId: state.user.id,
+                email: session.user.email,
+                returnUrl: window.location.origin + window.location.pathname,
+            },
+        });
+
+        if (res.error || res.data?.error) {
+            throw new Error(res.error?.message || res.data?.error);
+        }
+
+        window.location.href = res.data.url;
+    } catch (err) {
+        console.error('Checkout error:', err);
+        showToast('Could not start checkout: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<span class="btn-glow"></span>Become a Member — $8/month';
+    }
+}
+
+// Admin: grant or revoke membership from user profile modal
+async function grantMembership(userId, newRole, buttonEl) {
+    if (!userId) return;
+    const label = newRole === 'member' ? 'Grant Membership' : 'Revoke Membership';
+    if (!confirm(`${label} for this user?`)) return;
+
+    buttonEl.disabled = true;
+    try {
+        const { error } = await supabase
+            .from('user_profiles')
+            .update({ role: newRole })
+            .eq('id', userId);
+
+        if (error) throw error;
+
+        showToast(newRole === 'member' ? 'AI access granted!' : 'AI access revoked.', 'success');
+
+        // Refresh badge in modal
+        const badge = document.getElementById('vpRoleBadge');
+        if (badge) {
+            badge.textContent = newRole;
+            badge.className = `vp-role-badge ${newRole}`;
+        }
+
+        // Swap button
+        const isNowMember = newRole === 'member';
+        buttonEl.textContent = isNowMember ? '✕ Revoke AI Access' : '✦ Grant AI Access';
+        buttonEl.className   = `admin-grant-btn${isNowMember ? ' revoke' : ''}`;
+        buttonEl.onclick = () => grantMembership(userId, isNowMember ? 'unverified' : 'member', buttonEl);
+        buttonEl.disabled = false;
+
+    } catch (err) {
+        console.error('grantMembership error:', err);
+        showToast('Error: ' + err.message, 'error');
+        buttonEl.disabled = false;
+    }
+}
+
+// Admin: toggle database contribution access per user
+async function toggleDbAccess(userId, currentlyEnabled, buttonEl) {
+    if (!userId) return;
+    const action = currentlyEnabled ? 'Revoke DB access' : 'Enable DB contributions';
+    if (!confirm(`${action} for this user?`)) return;
+
+    buttonEl.disabled = true;
+    const newValue = !currentlyEnabled;
+
+    try {
+        const { error } = await supabase
+            .from('user_profiles')
+            .update({ can_contribute: newValue })
+            .eq('id', userId);
+
+        if (error) throw error;
+
+        showToast(newValue ? 'DB contributions enabled!' : 'DB access revoked.', 'success');
+
+        buttonEl.textContent = newValue ? '✕ Revoke DB Access' : '+ Enable DB Contributions';
+        buttonEl.className   = `admin-grant-btn${newValue ? ' revoke' : ''}`;
+        buttonEl.onclick = () => toggleDbAccess(userId, newValue, buttonEl);
+        buttonEl.disabled = false;
+
+    } catch (err) {
+        console.error('toggleDbAccess error:', err);
+        showToast('Error: ' + err.message, 'error');
+        buttonEl.disabled = false;
+    }
 }
 
 // ============================================================================
