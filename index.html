@@ -2,10 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>FashionDex</title>
     <link rel="stylesheet" href="styles.css?v=9">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <meta name='impact-site-verification' value='c397259a-7e9f-4742-a695-ffc19bcdb6e6'>
 </head> 
 <body>
     <!-- Login Screen -->
@@ -344,22 +345,29 @@
                             </button>
                         </div>
 
-                        <!-- Add Item Button -->
-                        <div class="closet-add-section closet-fab" id="closetAddSection">
-                            <button class="panel-btn add-btn" id="addClosetItemBtn">
-                                <span class="btn-glow"></span>
-                                <span class="btn-icon">+</span>
-                                <span class="btn-text">Add Item</span>
-                            </button>
-                        </div>
-
-                        <!-- AI Stylist Button -->
-                        <div class="ai-stylist-fab">
-                            <button class="ai-stylist-btn" id="aiStylistBtn">
-                                <span class="btn-glow"></span>
-                                <span class="ai-btn-icon">✦</span>
-                                <span class="btn-text">AI Stylist</span>
-                            </button>
+                        <!-- Closet Action Row: Add Item · AI Stylist · Style Match -->
+                        <div class="closet-action-row">
+                            <div class="closet-action-item closet-fab" id="closetAddSection">
+                                <button class="panel-btn add-btn" id="addClosetItemBtn">
+                                    <span class="btn-glow"></span>
+                                    <span class="btn-icon">+</span>
+                                    <span class="btn-text">Add Item</span>
+                                </button>
+                            </div>
+                            <div class="closet-action-item ai-stylist-fab">
+                                <button class="ai-stylist-btn" id="aiStylistBtn">
+                                    <span class="btn-glow"></span>
+                                    <span class="ai-btn-icon">✦</span>
+                                    <span class="btn-text">AI Stylist</span>
+                                </button>
+                            </div>
+                            <div class="closet-action-item style-match-fab">
+                                <button class="style-match-btn" id="styleMatchBtn">
+                                    <span class="btn-glow"></span>
+                                    <span class="ai-btn-icon">🔍</span>
+                                    <span class="btn-text">AI Image</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -1183,6 +1191,70 @@
                     <button class="ai-try-again-btn" id="aiTryAgain">Try Again</button>
                 </div>
                 <div class="ai-result-body" id="aiResultBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Style Match Modal -->
+    <div class="modal-overlay hidden" id="styleMatchOverlay">
+        <div class="ai-stylist-modal style-match-modal">
+            <div class="modal-header">
+                <h3 class="modal-title"><span class="ai-title-icon">🔍</span> Style Match</h3>
+                <button class="modal-close" id="styleMatchClose">×</button>
+            </div>
+
+            <div class="ai-stylist-form" id="styleMatchForm">
+                <p class="style-match-hint">Upload a photo of an outfit, person, or character — AI will identify the clothing pieces and match them to your closet.</p>
+                <div class="style-match-upload-area" id="styleMatchUploadArea">
+                    <input type="file" id="styleMatchImageInput" accept="image/*" style="display:none;">
+                    <div class="style-match-preview hidden" id="styleMatchPreview">
+                        <img id="styleMatchPreviewImg" src="" alt="Inspo image">
+                        <button type="button" class="style-match-clear-img" id="styleMatchClearImg">×</button>
+                    </div>
+                    <button type="button" class="upload-btn style-match-upload-btn" id="styleMatchUploadBtn">
+                        📷 Upload Inspo Photo
+                    </button>
+                </div>
+                <button class="ai-submit-btn" id="styleMatchSubmit" disabled>
+                    <span id="styleMatchSubmitText">Find Matches</span>
+                    <span id="styleMatchLoader" class="loader hidden"></span>
+                </button>
+            </div>
+
+            <div class="ai-result hidden" id="styleMatchResult">
+                <div class="ai-result-header">
+                    <span class="ai-result-label">🔍 Pieces Found</span>
+                    <button class="ai-try-again-btn" id="styleMatchTryAgain">Try Another</button>
+                </div>
+                <div class="ai-result-body" id="styleMatchResultBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Membership Upgrade Modal -->
+    <div class="modal-overlay hidden" id="upgradeModal">
+        <div class="modal-dialog upgrade-modal-dialog">
+            <div class="corner-accent tl"></div>
+            <div class="corner-accent tr"></div>
+            <div class="corner-accent bl"></div>
+            <div class="corner-accent br"></div>
+            <div class="modal-header">
+                <h2 class="modal-title">Members Only</h2>
+                <button class="modal-close" id="upgradeModalClose">×</button>
+            </div>
+            <div class="modal-body upgrade-modal-body">
+                <div class="upgrade-icon">✦</div>
+                <p class="upgrade-desc">AI features are available to FashionDex members. Unlock AI Stylist, AI Image matching, and AI auto-fill for your closet and archive.</p>
+                <ul class="upgrade-perks">
+                    <li>✦ AI Outfit Suggestions</li>
+                    <li>✦ AI Image Style Matching</li>
+                    <li>✦ AI Auto-Fill for Items</li>
+                </ul>
+                <button class="upgrade-cta-btn" id="upgradeCheckoutBtn">
+                    <span class="btn-glow"></span>
+                    Become a Member — $5/month
+                </button>
+                <p class="upgrade-note">Cancel anytime. Billed monthly via Stripe.</p>
             </div>
         </div>
     </div>
