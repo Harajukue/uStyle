@@ -253,6 +253,16 @@ function addToActivityLog(action, entryName, type = 'info') {
 // INITIALIZATION
 // ============================================================================
 
+// Called by native iOS app after Google OAuth completes via ASWebAuthenticationSession
+window.nativeAuthCallback = async function(url) {
+    try {
+        const { error } = await supabase.auth.exchangeCodeForSession(url);
+        if (error) console.error('Native auth callback error:', error);
+    } catch (e) {
+        console.error('Native auth callback exception:', e);
+    }
+};
+
 async function init() {
     await checkAuth();
     setupLoginListeners();
