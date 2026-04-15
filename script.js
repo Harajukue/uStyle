@@ -83,13 +83,9 @@ const socialModalState = {
 const dom = {
     // Login Screen
     loginScreen: document.getElementById('loginScreen'),
-    loginUsername: document.getElementById('loginUsername'),
-    loginPassword: document.getElementById('loginPassword'),
-    loginBtn: document.getElementById('loginBtn'),
-    loginBtnText: document.getElementById('loginBtnText'),
-    loginBtnLoader: document.getElementById('loginBtnLoader'),
     guestBtn: document.getElementById('guestBtn'),
     googleSignInBtn: document.getElementById('googleSignInBtn'),
+    appleSignInBtn: document.getElementById('appleSignInBtn'),
     
     // App Wrapper
     appWrapper: document.getElementById('appWrapper'),
@@ -291,13 +287,26 @@ async function checkAuth() {
 // ============================================================================
 
 function setupLoginListeners() {
-    dom.loginBtn.addEventListener('click', handleLogin);
     dom.guestBtn.addEventListener('click', handleGuestLogin);
     dom.googleSignInBtn.addEventListener('click', handleGoogleSignIn);
-    
-    dom.loginPassword.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleLogin();
-    });
+    if (dom.appleSignInBtn) dom.appleSignInBtn.addEventListener('click', handleAppleSignIn);
+}
+
+async function handleAppleSignIn() {
+    try {
+        showToast('Redirecting to Apple...', 'info');
+        const isNativeApp = navigator.userAgent.includes('uStyleApp');
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'apple',
+            options: {
+                redirectTo: isNativeApp ? 'ustyle://login-callback' : window.location.origin
+            }
+        });
+        if (error) throw error;
+    } catch (error) {
+        console.error('Apple sign-in error:', error);
+        showToast('Apple sign-in failed: ' + error.message, 'error');
+    }
 }
 
 async function handleGoogleSignIn() {
@@ -427,8 +436,6 @@ function handleSignOut() {
     state.draftEntries = [];
     dom.appWrapper.classList.add('hidden');
     dom.loginScreen.classList.remove('hidden');
-    dom.loginUsername.value = '';
-    dom.loginPassword.value = '';
 }
 
 // ============================================================================
@@ -490,6 +497,8 @@ async function showApp() {
     initStyleMatch();  // Initialize Style Match
     initAIStylist();   // Initialize AI Stylist
     initMembership();  // Initialize membership gating
+    initDeleteAccount(); // Initialize account deletion
+    initFlagModal();     // Initialize flag/report modal
     updateAll();
     updateClosetCounts(); // Initialize closet counts
     renderDraftsList();
@@ -4266,6 +4275,12 @@ window.switchContributionsTab = switchContributionsTab;
 // ============================================================================
 
 async function switchToSocialPage() {
+    // Show terms on first access
+    if (!hasAcceptedTerms()) {
+        showTermsModal(() => switchToSocialPage());
+        return;
+    }
+
     // Hide other pages, show social page
     const databasePage = document.getElementById('databasePage');
     const closetPage = document.getElementById('closetPage');
@@ -4367,18 +4382,26 @@ async function loadSocialUsers() {
             };
         }));
 
+        // Filter blocked users
+        const blocked = getBlockedUsers();
+        const visibleUsers = usersWithCounts.filter(u =>
+            u.id !== (state.user && state.user.id) && !blocked.includes(u.id)
+        );
+
         // Render user cards
-        const html = usersWithCounts.map(user => {
+        const html = visibleUsers.map(user => {
             const avatar = user.profile_pic_url
                 ? `<img src="${user.profile_pic_url}" alt="${user.display_name || 'User'}">`
                 : '👤';
+            const safeId = user.id.replace(/'/g, '');
+            const safeName = (user.display_name || 'Fashion Enthusiast').replace(/'/g, '&#39;');
 
             return `
-                <div class="user-card" onclick="viewUserProfile('${user.id}')">
-                    <div class="user-card-avatar">
+                <div class="user-card" data-user-id="${safeId}">
+                    <div class="user-card-avatar" onclick="viewUserProfile('${safeId}')">
                         ${avatar}
                     </div>
-                    <div class="user-card-name">${user.display_name || 'Fashion Enthusiast'}</div>
+                    <div class="user-card-name" onclick="viewUserProfile('${safeId}')">${user.display_name || 'Fashion Enthusiast'}</div>
                     <div class="user-card-status">${user.status || 'Style Explorer'}</div>
                     <div class="user-card-stats">
                         <div class="user-stat">
@@ -4390,12 +4413,16 @@ async function loadSocialUsers() {
                             <span class="user-stat-label">Closet</span>
                         </div>
                     </div>
+                    <div class="user-card-actions">
+                        <button class="ugc-flag-btn" onclick="event.stopPropagation();showFlagModal('${safeId}','user')" title="Report">⚑ Report</button>
+                        <button class="ugc-block-btn" onclick="event.stopPropagation();blockUser('${safeId}','${safeName}')" title="Block">⊘ Block</button>
+                    </div>
                 </div>
             `;
         }).join('');
 
         usersGrid.innerHTML = html;
-        if (userCount) userCount.textContent = `${profiles.length} user${profiles.length !== 1 ? 's' : ''}`;
+        if (userCount) userCount.textContent = `${visibleUsers.length} user${visibleUsers.length !== 1 ? 's' : ''}`;
 
     } catch (error) {
         console.error('Error loading users:', error);
@@ -4819,6 +4846,13 @@ function showUserProfileModal(profile, entries, closetItems) {
 
         ${adminControlsHtml}
 
+        ${(!isOwnProfile) ? `
+        <div class="vp-safety-actions">
+            <button class="ugc-flag-btn" onclick="showFlagModal('${profile.id}','user')">⚑ Report User</button>
+            <button class="ugc-block-btn" onclick="blockUser('${profile.id}','${(profile.display_name||'').replace(/'/g,'&#39;')}');closeUserProfileModal()">⊘ Block User</button>
+        </div>
+        ` : ''}
+
         ${(profile.bio || profile.interests || profile.favorite_designers) ? `
             <div class="vp-about-section">
                 ${profile.bio ? `
@@ -5159,6 +5193,8 @@ window.viewSocialClosetItem = viewSocialClosetItem;
 window.closeSocialDetailModal = closeSocialDetailModal;
 window.showProfileEntryModal = showProfileEntryModal;
 window.showProfileClosetModal = showProfileClosetModal;
+window.showFlagModal = showFlagModal;
+window.blockUser = blockUser;
 
 // ============================================================================
 // AI IMAGE FILL
@@ -5755,6 +5791,177 @@ async function toggleDbAccess(userId, currentlyEnabled, buttonEl) {
         buttonEl.disabled = false;
     }
 }
+
+// ============================================================================
+// ACCOUNT DELETION (Guideline 5.1.1v)
+// ============================================================================
+
+function initDeleteAccount() {
+    const deleteBtn = document.getElementById('deleteAccountBtn');
+    const modal = document.getElementById('deleteAccountModal');
+    const closeBtn = document.getElementById('deleteAccountModalClose');
+    const cancelBtn = document.getElementById('deleteAccountCancelBtn');
+    const confirmBtn = document.getElementById('deleteAccountConfirmBtn');
+    const input = document.getElementById('deleteConfirmInput');
+
+    if (!deleteBtn || !modal) return;
+
+    deleteBtn.addEventListener('click', () => {
+        if (!state.user || state.user.role === 'guest') {
+            showToast('Sign in to delete your account', 'error');
+            return;
+        }
+        input.value = '';
+        confirmBtn.disabled = true;
+        modal.classList.remove('hidden');
+    });
+
+    input.addEventListener('input', () => {
+        confirmBtn.disabled = input.value.trim() !== 'DELETE';
+    });
+
+    const closeModal = () => modal.classList.add('hidden');
+    closeBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Deleting...';
+        try {
+            const uid = state.user.id;
+
+            // Delete all user data
+            await supabase.from('closet_items').delete().eq('user_id', uid);
+            await supabase.from('entries').delete().eq('user_id', uid);
+            await supabase.from('user_profiles').delete().eq('id', uid);
+
+            // Sign out — auth record flagged for deletion server-side
+            await supabase.auth.signOut();
+
+            modal.classList.add('hidden');
+            showToast('Your account and data have been deleted.', 'success');
+            handleSignOut();
+        } catch (err) {
+            console.error('Account deletion error:', err);
+            showToast('Error deleting account: ' + err.message, 'error');
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Delete My Account';
+        }
+    });
+}
+
+// ============================================================================
+// TERMS / EULA (Guideline 1.2)
+// ============================================================================
+
+const TERMS_KEY = 'fashiondex-terms-accepted';
+
+function hasAcceptedTerms() {
+    return localStorage.getItem(TERMS_KEY) === '1';
+}
+
+function showTermsModal(onAccept) {
+    const modal = document.getElementById('termsModal');
+    const acceptBtn = document.getElementById('termsAcceptBtn');
+    const declineBtn = document.getElementById('termsDeclineBtn');
+    if (!modal) return;
+
+    modal.classList.remove('hidden');
+
+    const doAccept = () => {
+        localStorage.setItem(TERMS_KEY, '1');
+        modal.classList.add('hidden');
+        acceptBtn.removeEventListener('click', doAccept);
+        declineBtn.removeEventListener('click', doDecline);
+        if (onAccept) onAccept();
+    };
+    const doDecline = () => {
+        modal.classList.add('hidden');
+        acceptBtn.removeEventListener('click', doAccept);
+        declineBtn.removeEventListener('click', doDecline);
+    };
+
+    acceptBtn.addEventListener('click', doAccept);
+    declineBtn.addEventListener('click', doDecline);
+}
+
+// ============================================================================
+// FLAG & BLOCK (Guideline 1.2)
+// ============================================================================
+
+const BLOCKED_USERS_KEY = 'fashiondex-blocked-users';
+
+function getBlockedUsers() {
+    try {
+        return JSON.parse(localStorage.getItem(BLOCKED_USERS_KEY) || '[]');
+    } catch {
+        return [];
+    }
+}
+
+function blockUser(userId, displayName) {
+    if (!userId) return;
+    if (!confirm(`Block ${displayName || 'this user'}? Their content will be hidden from your feeds.`)) return;
+
+    const blocked = getBlockedUsers();
+    if (!blocked.includes(userId)) {
+        blocked.push(userId);
+        localStorage.setItem(BLOCKED_USERS_KEY, JSON.stringify(blocked));
+    }
+    showToast(`${displayName || 'User'} has been blocked.`, 'success');
+
+    // Remove their cards from the DOM immediately
+    document.querySelectorAll(`[data-user-id="${userId}"]`).forEach(el => el.remove());
+
+    // Report to developer via feedback table
+    if (state.user && state.user.id) {
+        supabase.from('feedback').insert({
+            user_id: state.user.id,
+            message: `[BLOCK REPORT] User ${userId} (${displayName}) was blocked by ${state.user.id}`
+        }).catch(() => {});
+    }
+}
+
+function showFlagModal(targetId, targetType) {
+    const modal = document.getElementById('flagModal');
+    if (!modal) return;
+    document.getElementById('flagTargetId').value = targetId;
+    document.getElementById('flagTargetType').value = targetType;
+    modal.classList.remove('hidden');
+}
+
+function initFlagModal() {
+    const modal = document.getElementById('flagModal');
+    const closeBtn = document.getElementById('flagModalClose');
+    if (!modal) return;
+
+    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+
+    document.getElementById('flagReasons').addEventListener('click', async (e) => {
+        const btn = e.target.closest('.flag-reason-btn');
+        if (!btn) return;
+
+        const reason = btn.dataset.reason;
+        const targetId = document.getElementById('flagTargetId').value;
+        const targetType = document.getElementById('flagTargetType').value;
+
+        // Save flag report
+        if (state.user && state.user.id) {
+            await supabase.from('feedback').insert({
+                user_id: state.user.id,
+                message: `[FLAG] ${targetType}:${targetId} — ${reason}`
+            }).catch(() => {});
+        }
+
+        modal.classList.add('hidden');
+        showToast('Thank you — report submitted.', 'success');
+    });
+}
+
+// Patch loadSocialUsers to filter blocked users and add action buttons
+const _origLoadSocialUsers = typeof loadSocialUsers === 'function' ? loadSocialUsers : null;
 
 // ============================================================================
 // START APPLICATION
