@@ -1,5 +1,5 @@
 // ============================================================================
-// FASHIONDEX - FULLY REVISED AND CLEANED UP JAVASCRIPT
+// USTYLE - FULLY REVISED AND CLEANED UP JAVASCRIPT
 // ============================================================================
 
 const SUPABASE_URL = 'https://qzunyhotqmrwwcgvurcq.supabase.co';
@@ -41,7 +41,7 @@ const state = {
     currentImageIndex: 0,
     activityLog: [],
     feedbackItems: [],
-    currentTheme: 'default',
+    currentTheme: 'letter',
 
     // Closet state
     closetMode: false,
@@ -260,9 +260,18 @@ window.nativeAuthCallback = async function(url) {
 };
 
 async function init() {
-    await checkAuth();
+    // Always attach button listeners FIRST — before any async work.
+    // If checkAuth() throws (CDN down, Supabase paused, network hiccup),
+    // the buttons would otherwise have zero handlers and silently do nothing.
     setupLoginListeners();
-    
+
+    if (!supabase) {
+        console.error('Supabase failed to initialize — CDN may be unavailable.');
+        dom.loginScreen.classList.remove('hidden');
+        showToast('Connection error. Please refresh the page.', 'error');
+        return;
+    }
+
     supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_IN' && session) {
             handleAuthSuccess(session);
@@ -270,15 +279,22 @@ async function init() {
             handleSignOut();
         }
     });
+
+    await checkAuth();
 }
 
 async function checkAuth() {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (session) {
-        await handleAuthSuccess(session);
-    } else {
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            await handleAuthSuccess(session);
+        } else {
+            dom.loginScreen.classList.remove('hidden');
+        }
+    } catch (e) {
+        console.error('checkAuth failed:', e);
         dom.loginScreen.classList.remove('hidden');
+        showToast('Could not connect to auth service. Try again.', 'error');
     }
 }
 
@@ -450,8 +466,9 @@ async function showApp() {
     
     const roleDisplay = {
         'admin': 'Admin',
+        'curator': 'Curator',
         'verified': 'Verified User',
-        'member': 'Member',        // ADD THIS
+        'member': 'Member',
         'unverified': 'Unverified User',
         'guest': 'Guest'
     };
@@ -478,6 +495,11 @@ async function showApp() {
         dom.feedbackDivider.style.display = (state.user.role === 'admin') ? 'none' : 'none';
     }
 
+    // Show admin-only themes
+    document.querySelectorAll('.admin-only-style').forEach(el => {
+        el.style.display = state.user.role === 'admin' ? '' : 'none';
+    });
+
     // Show/hide drafts section
     if (state.user && state.user.id) {
         dom.draftsSection.style.display = 'block';
@@ -489,16 +511,20 @@ async function showApp() {
     await loadData();
     await loadClosetItems(); // Load closet items
     setupAppListeners();
+    setupNativeApp();        // Native iOS app mode
     initClosetListeners(); // Initialize closet listeners
     initProfileListeners(); // Initialize profile listeners
     initSocialListeners(); // Initialize social listeners
     initFeedbackListeners(); // Initialize feedback panel
+    initFABListeners(); // Initialize center FAB button
     initAIFill();      // Initialize AI image fill
     initStyleMatch();  // Initialize Style Match
     initAIStylist();   // Initialize AI Stylist
-    initMembership();  // Initialize membership gating
-    initDeleteAccount(); // Initialize account deletion
-    initFlagModal();     // Initialize flag/report modal
+    initMembership();      // Initialize membership gating
+    initDeleteAccount();   // Initialize account deletion
+    initFlagModal();       // Initialize flag/report modal
+    initTradeModal();      // Initialize trade request modal
+    initCircleModal();     // Initialize style circle modal
     updateAll();
     updateClosetCounts(); // Initialize closet counts
     renderDraftsList();
@@ -546,6 +572,56 @@ async function loadData() {
 // ============================================================================
 // EVENT LISTENERS SETUP
 // ============================================================================
+
+function setupNativeApp() {
+    if (!navigator.userAgent.includes('uStyleApp')) return;
+    // Class already set by inline <head> script; ensure body also has it for body-level selectors
+    document.body.classList.add('native-app');
+
+    const dbFilterBtn = document.getElementById('dbFilterBtn');
+    if (dbFilterBtn) {
+        dbFilterBtn.addEventListener('click', () => dom.mobileMenuBtn?.click());
+    }
+
+    const closetFilterBtn = document.getElementById('closetFilterBtn');
+    if (closetFilterBtn) {
+        closetFilterBtn.addEventListener('click', () => dom.mobileMenuBtn?.click());
+    }
+
+    const nasFeedbackBtn = document.getElementById('nasFeedbackBtn');
+    const nasSignOutBtn = document.getElementById('nasSignOutBtn');
+    const nasTourBtn = document.getElementById('nasTourBtn');
+    const nasStyleGrid = document.getElementById('nasStyleGrid');
+
+    if (nasFeedbackBtn) {
+        nasFeedbackBtn.addEventListener('click', () => {
+            if (dom.activityPanel) dom.activityPanel.classList.add('active');
+        });
+    }
+
+    if (nasSignOutBtn) {
+        nasSignOutBtn.addEventListener('click', handleLogout);
+    }
+
+    if (nasTourBtn) {
+        nasTourBtn.addEventListener('click', () => showTutorial());
+    }
+
+    if (nasStyleGrid) {
+        nasStyleGrid.addEventListener('click', (e) => {
+            const option = e.target.closest('.style-option');
+            if (!option) return;
+            handleStyleChange({ target: option });
+            // Update active state in the grid
+            nasStyleGrid.querySelectorAll('.style-option').forEach(o => o.classList.remove('active'));
+            option.classList.add('active');
+        });
+        // Mark current theme active on load
+        nasStyleGrid.querySelectorAll('.style-option').forEach(o => {
+            o.classList.toggle('active', o.dataset.style === state.currentTheme);
+        });
+    }
+}
 
 function setupAppListeners() {
     // Top Bar
@@ -1586,7 +1662,7 @@ async function handleFormSubmit(e) {
         name: document.getElementById('entryName').value.trim() || null,
         subtitle: document.getElementById('entrySubtitle').value.trim() || null,
         type: dom.entryType.value,
-        status: 'published', 
+        status: state.user.role === 'admin' ? 'published' : 'pending',
         tags: document.getElementById('entryTags').value
             .split(',')
             .map(t => t.trim().toLowerCase())
@@ -1609,7 +1685,8 @@ async function handleFormSubmit(e) {
     
     try {
         if (state.editingEntry && state.editingEntry.status === 'published') {
-            // Updating existing published entry
+            // Updating existing published entry — keep it published regardless of role
+            formData.status = 'published';
             formData.updated_at = new Date().toISOString();
             formData.updated_by = state.user.username;
             
@@ -1623,11 +1700,12 @@ async function handleFormSubmit(e) {
             showToast(`${formData.name || 'Entry'} updated`, 'success');
             addToActivityLog('Entry updated', formData.name || 'Entry', 'updated');
         } else if (state.editingEntry && state.editingEntry.status === 'draft') {
-            // Publishing a draft - assign new number
-            const maxNumber = state.entries.length > 0 
-                ? Math.max(...state.entries.map(e => parseInt(e.number))) 
+            // Publishing a draft — admin goes live, others go to pending
+            formData.status = state.user.role === 'admin' ? 'published' : 'pending';
+            const maxNumber = state.entries.length > 0
+                ? Math.max(...state.entries.map(e => parseInt(e.number)))
                 : 0;
-            
+
             formData.number = String(maxNumber + 1).padStart(3, '0');
             formData.updated_at = new Date().toISOString();
             formData.updated_by = state.user.username;
@@ -1642,23 +1720,26 @@ async function handleFormSubmit(e) {
             showToast(`${formData.name || 'Entry'} updated`, 'success');
             addToActivityLog('Entry updated', formData.name || 'Entry', 'updated');
         } else {
-            const maxNumber = state.entries.length > 0 
-                ? Math.max(...state.entries.map(e => parseInt(e.number))) 
+            const maxNumber = state.entries.length > 0
+                ? Math.max(...state.entries.map(e => parseInt(e.number)))
                 : 0;
-            
+
             formData.number = String(maxNumber + 1).padStart(3, '0');
             formData.created_by = state.user.username;
             formData.user_id = state.user.id;
-            formData.status = 'published';
-            
+
             const { error } = await supabase
                 .from('entries')
                 .insert([formData]);
-            
+
             if (error) throw error;
-            
-            showToast(`${formData.name || 'Entry'} added`, 'success');
-            addToActivityLog('Entry added', formData.name || 'Entry', 'added');
+
+            if (formData.status === 'pending') {
+                showToast(`${formData.name || 'Entry'} submitted for review!`, 'success');
+            } else {
+                showToast(`${formData.name || 'Entry'} added`, 'success');
+            }
+            addToActivityLog('Entry submitted', formData.name || 'Entry', 'added');
         }
         
         await loadData();
@@ -1927,6 +2008,49 @@ function updateTagCloud() {
 }
 
 // ============================================================================
+// FAB (FLOATING ACTION BUTTON)
+// ============================================================================
+
+function initFABListeners() {
+    const fabBtn = document.getElementById('fabBtn');
+    const fabBackdrop = document.getElementById('fabBackdrop');
+    const fabOptions = document.getElementById('fabOptions');
+    const fabDatabaseBtn = document.getElementById('fabDatabaseBtn');
+    const fabClosetBtn = document.getElementById('fabClosetBtn');
+
+    if (!fabBtn) return;
+
+    function openFAB() {
+        fabBtn.classList.add('open');
+        fabBackdrop.classList.add('visible');
+        fabOptions.classList.add('visible');
+    }
+
+    function closeFAB() {
+        fabBtn.classList.remove('open');
+        fabBackdrop.classList.remove('visible');
+        fabOptions.classList.remove('visible');
+    }
+
+    fabBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fabBtn.classList.contains('open') ? closeFAB() : openFAB();
+    });
+
+    fabBackdrop.addEventListener('click', closeFAB);
+
+    fabDatabaseBtn.addEventListener('click', () => {
+        closeFAB();
+        openModal('add');
+    });
+
+    fabClosetBtn.addEventListener('click', () => {
+        closeFAB();
+        openClosetModal();
+    });
+}
+
+// ============================================================================
 // USER FEEDBACK SYSTEM
 // ============================================================================
 
@@ -2081,30 +2205,29 @@ function renderActivityLog() {}
 
 async function loadUserTheme() {
     if (!state.user || !state.user.id || state.user.role === 'guest') {
-        // Guests use default theme
-        state.currentTheme = 'default';
-        applyTheme('default');
+        state.currentTheme = 'letter';
+        applyTheme('letter');
         return;
     }
-    
+
     try {
         const { data, error } = await supabase
             .from('user_profiles')  // ✅ CORRECT
             .select('theme')
             .eq('id', state.user.id)
             .single();
-        
+
         if (!error && data && data.theme) {
             state.currentTheme = data.theme;
             applyTheme(data.theme);
         } else {
-            state.currentTheme = 'default';
-            applyTheme('default');
+            state.currentTheme = 'letter';
+            applyTheme('letter');
         }
     } catch (error) {
         console.error('Error loading theme:', error);
-        state.currentTheme = 'default';
-        applyTheme('default');
+        state.currentTheme = 'letter';
+        applyTheme('letter');
     }
 }
 // Add this NEW function
@@ -2157,7 +2280,9 @@ async function handleStyleChange(e) {
             'pokedex': 'Pokédex',
             'gameboy': 'Game Boy',
             'cozy': 'Cozy',
-            'console': 'Console'
+            'console': 'Console',
+            'letter': 'Wax Letter',
+            'rainbow': 'Cloud & Rainbow'
         };
         showToast(`Style changed to ${styleNames[style]}`, 'success');
     } catch (error) {
@@ -2193,7 +2318,7 @@ async function handleExport() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `fashiondex-${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `ustyle-${new Date().toISOString().split('T')[0]}.json`;
     link.click();
     URL.revokeObjectURL(url);
     showToast('Data exported', 'success');
@@ -3030,6 +3155,11 @@ function populateClosetForm(item) {
         publicCheckbox.checked = item.is_public !== false; // Default true
     }
 
+    const tradeCheckbox = document.getElementById('closetItemTradeAvailable');
+    if (tradeCheckbox) {
+        tradeCheckbox.checked = item.available_for_trade === true;
+    }
+
     // Set category selection
     document.querySelectorAll('#closetTypeGrid .type-card').forEach(card => {
         if (card.dataset.closetType === item.category) {
@@ -3154,7 +3284,8 @@ async function saveClosetItem(e) {
             purchase_price: dom.closetItemPrice.value ? parseFloat(dom.closetItemPrice.value) : null,
             status: 'active',
             favorite: state.editingClosetItem?.favorite || false,
-            is_public: document.getElementById('closetItemPublic')?.checked ?? true
+            is_public: document.getElementById('closetItemPublic')?.checked ?? true,
+            available_for_trade: document.getElementById('closetItemTradeAvailable')?.checked ?? false
         };
 
         let result;
@@ -3562,6 +3693,9 @@ async function loadProfileData() {
 
         if (profileEntriesCount) profileEntriesCount.textContent = userEntries.length;
         if (profileClosetCount) profileClosetCount.textContent = userClosetItems.length;
+
+        // Load style score into the stat box
+        loadStyleScore();
 
     } catch (error) {
         console.error('Error loading profile:', error);
@@ -4165,7 +4299,7 @@ async function saveOnboarding() {
         state.onboardingPhotoFile = null;
 
         closeOnboarding();
-        showToast('Profile created! Welcome to FashionDex!', 'success');
+        showToast('Profile created! Welcome to UStyle!', 'success');
         loadProfileData();
 
     } catch (error) {
@@ -4181,6 +4315,175 @@ function closeOnboarding() {
     if (overlay) overlay.classList.add('hidden');
     state.needsOnboarding = false;
     state.onboardingPhotoFile = null;
+    // Show tour automatically for brand new users
+    if (!localStorage.getItem(TUTORIAL_KEY)) {
+        setTimeout(() => showTutorial(), 400);
+    }
+}
+
+// ============================================================================
+// APP TUTORIAL
+// ============================================================================
+
+const TUTORIAL_KEY = 'ustyle-tutorial-seen';
+
+const TUTORIAL_STEPS = [
+    {
+        icon: '📋',
+        title: 'The Database',
+        desc: 'This is the shared fashion catalog — a growing index of clothing, brands, and eras contributed by the community.',
+        page: 'database',
+        highlight: null,
+        cardPos: 'default'
+    },
+    {
+        icon: '➕',
+        title: 'Adding Items',
+        desc: 'Tap the + button (center of the bottom bar) to add a new database entry. You can fill details manually or let AI auto-fill from a photo.',
+        page: 'database',
+        highlight: ['#fabBtn'],
+        cardPos: 'default'
+    },
+    {
+        icon: '👔',
+        title: 'Your Closet',
+        desc: 'Your personal wardrobe — private to you. Tap the red + circle at the bottom-right to add a piece you own.',
+        page: 'closet',
+        highlight: ['.closet-action-item.closet-fab'],
+        cardPos: 'default'
+    },
+    {
+        icon: '🔍',
+        title: 'AI Image Match',
+        desc: 'The magnifying glass scans a photo and finds matching items across the database. Great for ID-ing thrifted or unknown pieces.',
+        page: 'closet',
+        highlight: ['.closet-action-item.style-match-fab'],
+        cardPos: 'top'
+    },
+    {
+        icon: '✦',
+        title: 'AI Stylist',
+        desc: 'The sparkle button opens the AI Stylist. Ask it to build outfits from your closet, suggest what fits your vibe, or critique a look.',
+        page: 'closet',
+        highlight: ['.closet-action-item.ai-stylist-fab'],
+        cardPos: 'top'
+    },
+    {
+        icon: '🌐',
+        title: 'Community & Circles',
+        desc: 'Browse other users\' styles, join Style Circles, send trade requests, and follow fashion that inspires you. Use the filter tabs to switch views.',
+        page: 'social',
+        highlight: ['.social-filter-tabs'],
+        cardPos: 'default'
+    },
+    {
+        icon: '🎨',
+        title: 'Profile & Themes',
+        desc: 'Tap the theme swatches to switch your style — paper letter, cyberpunk, Game Boy, and more. Your Style Score tracks your contributions.',
+        page: 'profile',
+        highlight: ['#nasStyleGrid'],
+        cardPos: 'default'
+    }
+];
+
+let tutorialStep = 0;
+
+function applyTutorialHighlights(selectors) {
+    document.querySelectorAll('.tutorial-hl').forEach(el => el.classList.remove('tutorial-hl'));
+    if (!selectors) return;
+    selectors.forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => el.classList.add('tutorial-hl'));
+    });
+}
+
+function showTutorial(step) {
+    tutorialStep = step !== undefined ? step : 0;
+    const card = document.getElementById('tutorialCard');
+    if (!card) return;
+    card.classList.remove('hidden');
+    renderTutorialStep();
+
+    document.getElementById('tutorialSkipBtn').onclick = () => closeTutorial(true);
+    document.getElementById('tutorialNextBtn').onclick = tutorialNext;
+    document.getElementById('tutorialBackBtn').onclick = tutorialBack;
+}
+
+function closeTutorial(markSeen) {
+    const card = document.getElementById('tutorialCard');
+    if (card) {
+        card.classList.add('hidden');
+        card.classList.remove('tutorial-card--top');
+    }
+    applyTutorialHighlights(null);
+    if (markSeen) localStorage.setItem(TUTORIAL_KEY, '1');
+}
+
+function navigateToTutorialPage(pageName) {
+    const pageMap = {
+        database: switchToDatabasePage,
+        closet: switchToClosetPage,
+        social: switchToSocialPage,
+        profile: switchToProfilePage
+    };
+    const fn = pageMap[pageName];
+    if (!fn) return;
+    fn();
+    document.querySelectorAll('.bottom-nav-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.page === pageName);
+    });
+    document.querySelectorAll('.bookmark-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.page === pageName);
+    });
+}
+
+function renderTutorialStep() {
+    const step = TUTORIAL_STEPS[tutorialStep];
+    const total = TUTORIAL_STEPS.length;
+    const card = document.getElementById('tutorialCard');
+
+    document.getElementById('tutorialCounter').textContent = `${tutorialStep + 1} of ${total}`;
+    document.getElementById('tutorialIcon').textContent = step.icon;
+    document.getElementById('tutorialTitle').textContent = step.title;
+    document.getElementById('tutorialDesc').textContent = step.desc;
+
+    document.querySelectorAll('.tutorial-dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === tutorialStep);
+    });
+
+    // Card position
+    if (card) {
+        card.classList.toggle('tutorial-card--top', step.cardPos === 'top');
+    }
+
+    const backBtn = document.getElementById('tutorialBackBtn');
+    const nextBtn = document.getElementById('tutorialNextBtn');
+    backBtn.disabled = tutorialStep === 0;
+
+    if (tutorialStep === total - 1) {
+        nextBtn.textContent = 'Done ✓';
+        nextBtn.onclick = () => closeTutorial(true);
+    } else {
+        nextBtn.textContent = 'Next ▶';
+        nextBtn.onclick = tutorialNext;
+    }
+
+    if (step.page) navigateToTutorialPage(step.page);
+    // Apply highlights after a short delay so page transition completes
+    setTimeout(() => applyTutorialHighlights(step.highlight), 180);
+}
+
+function tutorialNext() {
+    if (tutorialStep < TUTORIAL_STEPS.length - 1) {
+        tutorialStep++;
+        renderTutorialStep();
+    }
+}
+
+function tutorialBack() {
+    if (tutorialStep > 0) {
+        tutorialStep--;
+        renderTutorialStep();
+    }
 }
 
 function initProfileListeners() {
@@ -4316,6 +4619,12 @@ async function switchToSocialPage() {
     state.selectedEntry = null;
     state.selectedClosetItem = null;
 
+    // Show admin-only tabs
+    const adminQueueTab = document.getElementById('adminQueueTab');
+    const analyticsTab = document.getElementById('analyticsTab');
+    if (adminQueueTab) adminQueueTab.style.display = state.user?.role === 'admin' ? '' : 'none';
+    if (analyticsTab) analyticsTab.style.display = (state.user?.role === 'admin' || state.user?.role === 'curator') ? '' : 'none';
+
     // Load social data
     await loadSocialData();
 }
@@ -4411,6 +4720,10 @@ async function loadSocialUsers() {
                         <div class="user-stat">
                             <span class="user-stat-num">${user.closetCount}</span>
                             <span class="user-stat-label">Closet</span>
+                        </div>
+                        <div class="user-stat score-stat">
+                            <span class="user-stat-num">${user.style_score || 0}</span>
+                            <span class="user-stat-label">Score</span>
                         </div>
                     </div>
                     <div class="user-card-actions">
@@ -4582,19 +4895,30 @@ async function loadSocialClosets() {
             const profile = profilesMap[item.user_id];
             const userName = profile?.display_name || profile?.username || 'Anonymous';
 
+            const isOwnItem = state.user && item.user_id === state.user.id;
+            const canRequestTrade = item.available_for_trade && !isOwnItem && state.user && state.user.role !== 'guest';
+            const safeItemId = item.id.replace(/'/g, '');
+            const safeItemName = encodeURIComponent(item.name || '');
+            const safeOwnerId = (item.user_id || '').replace(/'/g, '');
             return `
-                <div class="closet-social-card" onclick="viewSocialClosetItem('${item.id}')">
+                <div class="closet-social-card" onclick="viewSocialClosetItem('${safeItemId}')">
                     <div class="closet-social-image">
                         ${firstImage
-                            ? `<img src="${firstImage}" alt="${item.name}">`
+                            ? `<img src="${firstImage}" alt="${item.name || ''}">`
                             : '👔'
                         }
                         <div class="closet-social-category">${item.category}</div>
+                        ${item.available_for_trade ? `<div class="trade-badge">🔄 Trade</div>` : ''}
                     </div>
                     <div class="closet-social-content">
                         <div class="closet-social-name">${item.name}</div>
                         <div class="closet-social-brand">${item.brand || item.category}</div>
                         <div class="closet-social-owner">👤 ${userName}</div>
+                        ${canRequestTrade ? `
+                            <button class="trade-request-btn" onclick="event.stopPropagation();openTradeRequestModal('${safeItemId}','${safeOwnerId}','${safeItemName}')">
+                                🔄 Request Trade
+                            </button>
+                        ` : ''}
                     </div>
                 </div>
             `;
@@ -4617,35 +4941,44 @@ async function loadSocialClosets() {
 // Social filter tabs functionality
 function initSocialListeners() {
     const socialTabs = document.querySelectorAll('.social-tab');
-    const usersSection = document.getElementById('usersSection');
-    const entriesSection = document.getElementById('entriesSection');
-    const closetsSection = document.getElementById('closetsSection');
+
+    const allSections = ['usersSection','entriesSection','closetsSection',
+                         'circlesSection','tradesSection','adminQueueSection','analyticsSection'];
+
+    function hideAllSocialSections() {
+        allSections.forEach(id => document.getElementById(id)?.classList.add('hidden'));
+    }
 
     socialTabs.forEach(tab => {
         tab.addEventListener('click', () => {
-            // Update active tab
             socialTabs.forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
+            hideAllSocialSections();
 
             const filter = tab.dataset.filter;
 
-            // Show/hide sections based on filter
             if (filter === 'all') {
-                usersSection?.classList.remove('hidden');
-                entriesSection?.classList.remove('hidden');
-                closetsSection?.classList.remove('hidden');
+                document.getElementById('usersSection')?.classList.remove('hidden');
+                document.getElementById('entriesSection')?.classList.remove('hidden');
+                document.getElementById('closetsSection')?.classList.remove('hidden');
             } else if (filter === 'users') {
-                usersSection?.classList.remove('hidden');
-                entriesSection?.classList.add('hidden');
-                closetsSection?.classList.add('hidden');
+                document.getElementById('usersSection')?.classList.remove('hidden');
             } else if (filter === 'entries') {
-                usersSection?.classList.add('hidden');
-                entriesSection?.classList.remove('hidden');
-                closetsSection?.classList.add('hidden');
+                document.getElementById('entriesSection')?.classList.remove('hidden');
             } else if (filter === 'closets') {
-                usersSection?.classList.add('hidden');
-                entriesSection?.classList.add('hidden');
-                closetsSection?.classList.remove('hidden');
+                document.getElementById('closetsSection')?.classList.remove('hidden');
+            } else if (filter === 'circles') {
+                document.getElementById('circlesSection')?.classList.remove('hidden');
+                loadStyleCircles();
+            } else if (filter === 'trades') {
+                document.getElementById('tradesSection')?.classList.remove('hidden');
+                loadTradeRequests();
+            } else if (filter === 'queue') {
+                document.getElementById('adminQueueSection')?.classList.remove('hidden');
+                loadPendingEntries();
+            } else if (filter === 'analytics') {
+                document.getElementById('analyticsSection')?.classList.remove('hidden');
+                loadAnalytics();
             }
         });
     });
@@ -5672,7 +6005,7 @@ function updateMembershipUI() {
     // Handle post-payment redirect
     const params = new URLSearchParams(window.location.search);
     if (params.get('membership') === 'success') {
-        showToast('Welcome to FashionDex! Membership activated.', 'success');
+        showToast('Welcome to UStyle! Membership activated.', 'success');
         // Clean up URL
         window.history.replaceState({}, '', window.location.pathname);
     } else if (params.get('membership') === 'cancel') {
@@ -5855,7 +6188,7 @@ function initDeleteAccount() {
 // TERMS / EULA (Guideline 1.2)
 // ============================================================================
 
-const TERMS_KEY = 'fashiondex-terms-accepted';
+const TERMS_KEY = 'ustyle-terms-accepted';
 
 function hasAcceptedTerms() {
     return localStorage.getItem(TERMS_KEY) === '1';
@@ -5890,7 +6223,7 @@ function showTermsModal(onAccept) {
 // FLAG & BLOCK (Guideline 1.2)
 // ============================================================================
 
-const BLOCKED_USERS_KEY = 'fashiondex-blocked-users';
+const BLOCKED_USERS_KEY = 'ustyle-blocked-users';
 
 function getBlockedUsers() {
     try {
@@ -5919,7 +6252,7 @@ function blockUser(userId, displayName) {
         supabase.from('feedback').insert({
             user_id: state.user.id,
             message: `[BLOCK REPORT] User ${userId} (${displayName}) was blocked by ${state.user.id}`
-        }).catch(() => {});
+        }).then(null, () => {});
     }
 }
 
@@ -5952,7 +6285,7 @@ function initFlagModal() {
             await supabase.from('feedback').insert({
                 user_id: state.user.id,
                 message: `[FLAG] ${targetType}:${targetId} — ${reason}`
-            }).catch(() => {});
+            }).then(null, () => {});
         }
 
         modal.classList.add('hidden');
@@ -5960,8 +6293,869 @@ function initFlagModal() {
     });
 }
 
-// Patch loadSocialUsers to filter blocked users and add action buttons
-const _origLoadSocialUsers = typeof loadSocialUsers === 'function' ? loadSocialUsers : null;
+// ============================================================================
+// ADMIN APPROVAL QUEUE
+// ============================================================================
+
+async function loadPendingEntries() {
+    const grid = document.getElementById('pendingEntriesGrid');
+    const label = document.getElementById('pendingCountLabel');
+    if (!grid) return;
+
+    grid.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading queue...</p></div>';
+
+    try {
+        const { data: pending, error } = await supabase
+            .from('entries')
+            .select('*')
+            .eq('status', 'pending')
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        if (label) label.textContent = `${(pending || []).length} pending`;
+
+        if (!pending || pending.length === 0) {
+            grid.innerHTML = `
+                <div class="empty-state-social">
+                    <div class="empty-icon">✅</div>
+                    <div class="empty-text">Queue is clear — all caught up!</div>
+                </div>`;
+            return;
+        }
+
+        grid.innerHTML = pending.map(entry => {
+            const img = entry.images && entry.images.length > 0 ? entry.images[0] : null;
+            const submitted = entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '';
+            return `
+                <div class="pending-entry-card" id="pending-${entry.id}">
+                    <div class="pending-entry-image">
+                        ${img ? `<img src="${img}" alt="${entry.name || ''}">` : `<div class="pending-no-img">${getEmojiForType(entry.type)}</div>`}
+                        <span class="pending-type-badge">${entry.type || ''}</span>
+                    </div>
+                    <div class="pending-entry-info">
+                        <div class="pending-entry-name">${entry.name || 'Untitled'}</div>
+                        <div class="pending-entry-sub">${entry.subtitle || ''}</div>
+                        <div class="pending-entry-meta">by ${entry.created_by || 'Unknown'} · ${submitted}</div>
+                        ${entry.description ? `<div class="pending-entry-desc">${entry.description.slice(0, 120)}${entry.description.length > 120 ? '…' : ''}</div>` : ''}
+                    </div>
+                    <div class="pending-entry-actions">
+                        <button class="approve-btn" onclick="approveEntry('${entry.id}','${(entry.user_id||'').replace(/'/g,'')}')">✓ Approve</button>
+                        <button class="reject-btn" onclick="rejectEntry('${entry.id}')">✕ Reject</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        grid.innerHTML = `<div class="empty-state-social"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading queue: ${err.message}</div></div>`;
+    }
+}
+
+async function approveEntry(entryId, userId) {
+    if (state.user?.role !== 'admin') return;
+
+    const maxNumber = state.entries.length > 0
+        ? Math.max(...state.entries.map(e => parseInt(e.number) || 0))
+        : 0;
+
+    try {
+        const { error } = await supabase
+            .from('entries')
+            .update({
+                status: 'published',
+                number: String(maxNumber + 1).padStart(3, '0'),
+                updated_at: new Date().toISOString(),
+                updated_by: state.user.username
+            })
+            .eq('id', entryId);
+
+        if (error) throw error;
+
+        // Award style score to submitter
+        if (userId) await awardStyleScore(userId, 10, 'piece_submitted', entryId);
+
+        showToast('Entry approved and published!', 'success');
+
+        // Log admin action
+        await supabase.from('admin_actions').insert({
+            admin_id: state.user.id,
+            target_id: entryId,
+            target_type: 'entry',
+            action: 'approve'
+        }).then(null, () => {});
+
+        document.getElementById(`pending-${entryId}`)?.remove();
+        const label = document.getElementById('pendingCountLabel');
+        if (label) {
+            const remaining = document.querySelectorAll('.pending-entry-card').length;
+            label.textContent = `${remaining} pending`;
+        }
+
+        // Refresh main feed
+        await loadData();
+        updateAll();
+    } catch (err) {
+        showToast('Error approving entry: ' + err.message, 'error');
+    }
+}
+
+async function rejectEntry(entryId) {
+    if (state.user?.role !== 'admin') return;
+    if (!confirm('Reject and delete this submission?')) return;
+
+    try {
+        const { error } = await supabase
+            .from('entries')
+            .update({ status: 'rejected', updated_at: new Date().toISOString() })
+            .eq('id', entryId);
+
+        if (error) throw error;
+
+        showToast('Submission rejected.', 'info');
+
+        await supabase.from('admin_actions').insert({
+            admin_id: state.user.id,
+            target_id: entryId,
+            target_type: 'entry',
+            action: 'reject'
+        }).then(null, () => {});
+
+        document.getElementById(`pending-${entryId}`)?.remove();
+        const label = document.getElementById('pendingCountLabel');
+        if (label) {
+            const remaining = document.querySelectorAll('.pending-entry-card').length;
+            label.textContent = `${remaining} pending`;
+        }
+    } catch (err) {
+        showToast('Error rejecting entry: ' + err.message, 'error');
+    }
+}
+
+window.approveEntry = approveEntry;
+window.rejectEntry = rejectEntry;
+
+// ============================================================================
+// STYLE SCORE SYSTEM
+// ============================================================================
+
+const SCORE_POINTS = {
+    piece_submitted: 10,
+    closet_item_added: 3,
+    trade_completed: 15
+};
+
+async function awardStyleScore(userId, points, eventType, refId = null) {
+    try {
+        // Insert score event
+        await supabase.from('score_events').insert({
+            user_id: userId,
+            event_type: eventType,
+            points: points,
+            ref_id: refId
+        });
+
+        // Increment style_score on user_profiles
+        const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('style_score')
+            .eq('id', userId)
+            .single();
+
+        const currentScore = profile?.style_score || 0;
+        await supabase
+            .from('user_profiles')
+            .update({ style_score: currentScore + points })
+            .eq('id', userId);
+
+        // Refresh profile display if it's the current user
+        if (userId === state.user?.id) {
+            const el = document.getElementById('profileStyleScore');
+            if (el) el.textContent = currentScore + points;
+        }
+    } catch (err) {
+        console.error('awardStyleScore error:', err);
+    }
+}
+
+async function loadStyleScore() {
+    if (!state.user?.id) return;
+    try {
+        const { data } = await supabase
+            .from('user_profiles')
+            .select('style_score')
+            .eq('id', state.user.id)
+            .single();
+
+        const score = data?.style_score || 0;
+        const el = document.getElementById('profileStyleScore');
+        if (el) el.textContent = score;
+    } catch (err) {
+        console.error('loadStyleScore error:', err);
+    }
+}
+
+// ============================================================================
+// TRADE REQUESTS
+// ============================================================================
+
+const tradeState = {
+    pendingItemId: null,
+    pendingOwnerId: null,
+    pendingItemName: null,
+    activeTab: 'browse'
+};
+
+function openTradeRequestModal(itemId, ownerId, itemName) {
+    if (!state.user || state.user.role === 'guest') {
+        showToast('Sign in to request trades', 'error');
+        return;
+    }
+    tradeState.pendingItemId = itemId;
+    tradeState.pendingOwnerId = ownerId;
+    tradeState.pendingItemName = decodeURIComponent(itemName);
+
+    const preview = document.getElementById('tradeItemPreview');
+    if (preview) {
+        preview.innerHTML = `
+            <div class="trade-item-name">🔄 Requesting: <strong>${tradeState.pendingItemName}</strong></div>
+        `;
+    }
+
+    const messageInput = document.getElementById('tradeMessageInput');
+    if (messageInput) messageInput.value = '';
+
+    document.getElementById('tradeRequestModal')?.classList.remove('hidden');
+}
+
+function initTradeModal() {
+    const modal = document.getElementById('tradeRequestModal');
+    if (!modal) return;
+
+    document.getElementById('tradeModalClose')?.addEventListener('click', closeTradeModal);
+    document.getElementById('tradeCancelBtn')?.addEventListener('click', closeTradeModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeTradeModal(); });
+
+    document.getElementById('tradeSendBtn')?.addEventListener('click', sendTradeRequest);
+
+    // Sub-tabs in trades section
+    document.addEventListener('click', e => {
+        const btn = e.target.closest('.trades-sub-tab');
+        if (!btn) return;
+        document.querySelectorAll('.trades-sub-tab').forEach(t => t.classList.remove('active'));
+        btn.classList.add('active');
+        tradeState.activeTab = btn.dataset.tradesTab;
+        renderTradeTab(tradeState.activeTab);
+    });
+}
+
+function closeTradeModal() {
+    document.getElementById('tradeRequestModal')?.classList.add('hidden');
+    tradeState.pendingItemId = null;
+    tradeState.pendingOwnerId = null;
+    tradeState.pendingItemName = null;
+}
+
+async function sendTradeRequest() {
+    if (!tradeState.pendingItemId || !tradeState.pendingOwnerId) return;
+
+    const message = document.getElementById('tradeMessageInput')?.value.trim() || '';
+
+    try {
+        const { error } = await supabase.from('trade_requests').insert({
+            item_id: tradeState.pendingItemId,
+            requester_id: state.user.id,
+            owner_id: tradeState.pendingOwnerId,
+            message: message,
+            status: 'pending'
+        });
+
+        if (error) throw error;
+
+        showToast('Trade request sent!', 'success');
+        closeTradeModal();
+    } catch (err) {
+        showToast('Error sending trade request: ' + err.message, 'error');
+    }
+}
+
+async function loadTradeRequests() {
+    if (!state.user || state.user.role === 'guest') {
+        document.getElementById('tradesContent').innerHTML = `
+            <div class="empty-state-social">
+                <div class="empty-icon">🔄</div>
+                <div class="empty-text">Sign in to view trade requests</div>
+            </div>`;
+        return;
+    }
+    renderTradeTab(tradeState.activeTab || 'browse');
+}
+
+async function renderTradeTab(tab) {
+    const container = document.getElementById('tradesContent');
+    if (!container) return;
+    container.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading...</p></div>';
+
+    try {
+        if (tab === 'browse') {
+            // Show all tradeable public closet items
+            const { data: items, error } = await supabase
+                .from('closet_items')
+                .select('*')
+                .eq('is_public', true)
+                .eq('available_for_trade', true)
+                .order('created_at', { ascending: false })
+                .limit(40);
+
+            if (error) throw error;
+
+            if (!items || items.length === 0) {
+                container.innerHTML = `<div class="empty-state-social"><div class="empty-icon">🔄</div><div class="empty-text">No items available for trade yet</div></div>`;
+                return;
+            }
+
+            const userIds = [...new Set(items.map(i => i.user_id).filter(Boolean))];
+            let profilesMap = {};
+            if (userIds.length > 0) {
+                const { data: profiles } = await supabase
+                    .from('user_profiles')
+                    .select('id, display_name')
+                    .in('id', userIds);
+                if (profiles) profiles.forEach(p => { profilesMap[p.id] = p; });
+            }
+
+            container.innerHTML = `<div class="trades-browse-grid">${items.map(item => {
+                const isOwn = item.user_id === state.user?.id;
+                const img = item.images?.[0];
+                const ownerName = profilesMap[item.user_id]?.display_name || 'Anonymous';
+                const safeId = item.id.replace(/'/g, '');
+                const safeName = encodeURIComponent(item.name || '');
+                const safeOwner = (item.user_id || '').replace(/'/g, '');
+                return `
+                    <div class="trade-browse-card">
+                        <div class="trade-browse-img">${img ? `<img src="${img}" alt="${item.name || ''}">` : '👔'}</div>
+                        <div class="trade-browse-info">
+                            <div class="trade-browse-name">${item.name || 'Untitled'}</div>
+                            <div class="trade-browse-brand">${item.brand || item.category}</div>
+                            <div class="trade-browse-owner">👤 ${ownerName}</div>
+                        </div>
+                        ${!isOwn && state.user.role !== 'guest' ? `
+                            <button class="trade-request-btn" onclick="openTradeRequestModal('${safeId}','${safeOwner}','${safeName}')">
+                                Request Trade
+                            </button>
+                        ` : (isOwn ? `<div class="trade-own-label">Your item</div>` : '')}
+                    </div>`;
+            }).join('')}</div>`;
+
+        } else if (tab === 'incoming') {
+            const { data: incoming, error } = await supabase
+                .from('trade_requests')
+                .select('*')
+                .eq('owner_id', state.user.id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            container.innerHTML = renderTradeRequestList(incoming || [], 'incoming');
+
+        } else if (tab === 'outgoing') {
+            const { data: outgoing, error } = await supabase
+                .from('trade_requests')
+                .select('*')
+                .eq('requester_id', state.user.id)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            container.innerHTML = renderTradeRequestList(outgoing || [], 'outgoing');
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="empty-state-social"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading trades: ${err.message}</div></div>`;
+    }
+}
+
+function renderTradeRequestList(requests, direction) {
+    if (requests.length === 0) {
+        return `<div class="empty-state-social"><div class="empty-icon">🔄</div><div class="empty-text">No ${direction} trade requests</div></div>`;
+    }
+
+    return `<div class="trade-request-list">${requests.map(req => {
+        const statusClass = `trade-status-${req.status}`;
+        const date = new Date(req.created_at).toLocaleDateString();
+        const actions = direction === 'incoming' && req.status === 'pending' ? `
+            <div class="trade-req-actions">
+                <button class="approve-btn" onclick="acceptTrade('${req.id}','${req.requester_id}')">Accept</button>
+                <button class="reject-btn" onclick="declineTrade('${req.id}')">Decline</button>
+            </div>` : '';
+        return `
+            <div class="trade-request-item" id="trade-req-${req.id}">
+                <div class="trade-req-info">
+                    <span class="trade-req-label">${direction === 'incoming' ? 'From' : 'To'}: ${direction === 'incoming' ? req.requester_id.slice(0,8) : req.owner_id.slice(0,8)}…</span>
+                    <span class="trade-req-date">${date}</span>
+                    <span class="trade-req-status ${statusClass}">${req.status}</span>
+                </div>
+                ${req.message ? `<div class="trade-req-message">"${req.message}"</div>` : ''}
+                ${actions}
+            </div>`;
+    }).join('')}</div>`;
+}
+
+async function acceptTrade(tradeId, requesterId) {
+    try {
+        const { error } = await supabase
+            .from('trade_requests')
+            .update({ status: 'accepted', updated_at: new Date().toISOString() })
+            .eq('id', tradeId);
+
+        if (error) throw error;
+
+        // Award score to both parties
+        await awardStyleScore(state.user.id, SCORE_POINTS.trade_completed, 'trade_completed', tradeId);
+        if (requesterId) await awardStyleScore(requesterId, SCORE_POINTS.trade_completed, 'trade_completed', tradeId);
+
+        showToast('Trade accepted! Both parties earn 15 Style Score points.', 'success');
+        renderTradeTab('incoming');
+    } catch (err) {
+        showToast('Error accepting trade: ' + err.message, 'error');
+    }
+}
+
+async function declineTrade(tradeId) {
+    try {
+        const { error } = await supabase
+            .from('trade_requests')
+            .update({ status: 'rejected', updated_at: new Date().toISOString() })
+            .eq('id', tradeId);
+
+        if (error) throw error;
+        showToast('Trade declined.', 'info');
+        renderTradeTab('incoming');
+    } catch (err) {
+        showToast('Error declining trade: ' + err.message, 'error');
+    }
+}
+
+window.openTradeRequestModal = openTradeRequestModal;
+window.acceptTrade = acceptTrade;
+window.declineTrade = declineTrade;
+
+// ============================================================================
+// STYLE CIRCLES
+// ============================================================================
+
+const circleState = {
+    viewingCircleId: null
+};
+
+function initCircleModal() {
+    const modal = document.getElementById('circleModal');
+    if (!modal) return;
+
+    document.getElementById('circleModalClose')?.addEventListener('click', closeCircleModal);
+    document.getElementById('circleCancelBtn')?.addEventListener('click', closeCircleModal);
+    modal.addEventListener('click', e => { if (e.target === modal) closeCircleModal(); });
+
+    document.getElementById('circleCreateBtn')?.addEventListener('click', createStyleCircle);
+
+    const createBtn = document.getElementById('createCircleBtn');
+    if (createBtn) {
+        createBtn.addEventListener('click', () => {
+            if (!state.user || state.user.role === 'guest') {
+                showToast('Sign in to create a Style Circle', 'error');
+                return;
+            }
+            showCircleCreateForm();
+        });
+    }
+}
+
+function showCircleCreateForm() {
+    document.getElementById('circleCreateForm')?.classList.remove('hidden');
+    document.getElementById('circleDetailView')?.classList.add('hidden');
+    document.getElementById('circleModalTitle').textContent = 'Create a Style Circle';
+    document.getElementById('circleNameInput').value = '';
+    document.getElementById('circleModal')?.classList.remove('hidden');
+}
+
+function closeCircleModal() {
+    document.getElementById('circleModal')?.classList.add('hidden');
+    circleState.viewingCircleId = null;
+}
+
+async function createStyleCircle() {
+    const name = document.getElementById('circleNameInput')?.value.trim();
+    if (!name) {
+        showToast('Enter a circle name', 'error');
+        return;
+    }
+    if (!state.user?.id) return;
+
+    try {
+        const { error } = await supabase
+            .from('style_circles')
+            .insert({
+                name: name,
+                creator_id: state.user.id,
+                member_ids: [state.user.id]
+            });
+
+        if (error) throw error;
+
+        showToast(`Style Circle "${name}" created!`, 'success');
+        closeCircleModal();
+        loadStyleCircles();
+    } catch (err) {
+        showToast('Error creating circle: ' + err.message, 'error');
+    }
+}
+
+async function loadStyleCircles() {
+    const grid = document.getElementById('circlesGrid');
+    if (!grid) return;
+
+    grid.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading circles...</p></div>';
+
+    try {
+        if (!state.user || state.user.role === 'guest') {
+            grid.innerHTML = `<div class="empty-state-social"><div class="empty-icon">⭕</div><div class="empty-text">Sign in to view Style Circles</div></div>`;
+            return;
+        }
+
+        // Load circles where user is a member or creator
+        const { data: circles, error } = await supabase
+            .from('style_circles')
+            .select('*')
+            .or(`creator_id.eq.${state.user.id},member_ids.cs.{${state.user.id}}`)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (!circles || circles.length === 0) {
+            grid.innerHTML = `
+                <div class="empty-state-social">
+                    <div class="empty-icon">⭕</div>
+                    <div class="empty-text">No circles yet</div>
+                    <div class="empty-subtext">Create one to connect with up to 8 friends</div>
+                </div>`;
+            return;
+        }
+
+        grid.innerHTML = circles.map(circle => {
+            const memberCount = (circle.member_ids || []).length;
+            const isCreator = circle.creator_id === state.user.id;
+            return `
+                <div class="circle-card" onclick="viewStyleCircle('${circle.id}')">
+                    <div class="circle-card-icon">⭕</div>
+                    <div class="circle-card-name">${circle.name}</div>
+                    <div class="circle-card-members">${memberCount}/8 members</div>
+                    ${isCreator ? `<div class="circle-creator-badge">Creator</div>` : ''}
+                </div>`;
+        }).join('');
+    } catch (err) {
+        grid.innerHTML = `<div class="empty-state-social"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading circles: ${err.message}</div></div>`;
+    }
+}
+
+async function viewStyleCircle(circleId) {
+    circleState.viewingCircleId = circleId;
+    document.getElementById('circleCreateForm')?.classList.add('hidden');
+    const detailView = document.getElementById('circleDetailView');
+    detailView?.classList.remove('hidden');
+    document.getElementById('circleModal')?.classList.remove('hidden');
+
+    try {
+        const { data: circle, error } = await supabase
+            .from('style_circles')
+            .select('*')
+            .eq('id', circleId)
+            .single();
+
+        if (error) throw error;
+
+        document.getElementById('circleModalTitle').textContent = circle.name;
+
+        const memberIds = circle.member_ids || [];
+        const isCreator = circle.creator_id === state.user?.id;
+        const canInvite = isCreator && memberIds.length < 8;
+
+        // Render header
+        const header = document.getElementById('circleDetailHeader');
+        if (header) {
+            header.innerHTML = `
+                <div class="circle-detail-meta">${memberIds.length}/8 members</div>
+                ${canInvite ? `<button class="circle-invite-btn" onclick="showCircleInvite('${circleId}')">+ Invite Member</button>` : ''}
+                ${isCreator ? `<button class="circle-leave-btn danger" onclick="deleteCircle('${circleId}')">Delete Circle</button>` : `<button class="circle-leave-btn" onclick="leaveCircle('${circleId}')">Leave Circle</button>`}
+            `;
+        }
+
+        // Load member profiles
+        const membersSection = document.getElementById('circleMembersSection');
+        if (membersSection && memberIds.length > 0) {
+            const { data: profiles } = await supabase
+                .from('user_profiles')
+                .select('id, display_name, profile_pic_url')
+                .in('id', memberIds);
+
+            membersSection.innerHTML = `
+                <div class="circle-members-label">Members</div>
+                <div class="circle-members-list">
+                    ${(profiles || []).map(p => `
+                        <div class="circle-member">
+                            <div class="circle-member-avatar">
+                                ${p.profile_pic_url ? `<img src="${p.profile_pic_url}" alt="${p.display_name}">` : '👤'}
+                            </div>
+                            <span>${p.display_name || 'User'}</span>
+                            ${isCreator && p.id !== state.user?.id ? `<button class="circle-remove-btn" onclick="removeMember('${circleId}','${p.id}')">×</button>` : ''}
+                        </div>`).join('')}
+                </div>`;
+        }
+
+        // Load circle feed — entries and closet items from members
+        await loadCircleFeed(memberIds);
+
+    } catch (err) {
+        showToast('Error loading circle: ' + err.message, 'error');
+    }
+}
+
+async function loadCircleFeed(memberIds) {
+    const feed = document.getElementById('circleFeed');
+    if (!feed || !memberIds.length) return;
+
+    feed.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading feed...</p></div>';
+
+    try {
+        const [entriesRes, closetRes] = await Promise.all([
+            supabase.from('entries').select('*').in('user_id', memberIds).eq('status', 'published').order('created_at', { ascending: false }).limit(20),
+            supabase.from('closet_items').select('*').in('user_id', memberIds).eq('is_public', true).order('created_at', { ascending: false }).limit(20)
+        ]);
+
+        const entries = entriesRes.data || [];
+        const closetItems = closetRes.data || [];
+
+        const combined = [
+            ...entries.map(e => ({ ...e, _feedType: 'entry' })),
+            ...closetItems.map(c => ({ ...c, _feedType: 'closet' }))
+        ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 30);
+
+        if (combined.length === 0) {
+            feed.innerHTML = `<div class="empty-state-social"><div class="empty-icon">📷</div><div class="empty-text">No posts from circle members yet</div></div>`;
+            return;
+        }
+
+        feed.innerHTML = `<div class="circle-feed-label">Circle Feed</div><div class="circle-feed-grid">${combined.map(item => {
+            const img = item.images?.[0];
+            const label = item._feedType === 'entry' ? (item.type || 'entry') : (item.category || 'closet');
+            const name = item.name || item.item_name || 'Untitled';
+            return `
+                <div class="circle-feed-card">
+                    <div class="circle-feed-img">
+                        ${img ? `<img src="${img}" alt="${name}">` : (item._feedType === 'entry' ? getEmojiForType(item.type) : '👔')}
+                        <span class="circle-feed-badge">${label}</span>
+                    </div>
+                    <div class="circle-feed-name">${name}</div>
+                </div>`;
+        }).join('')}</div>`;
+    } catch (err) {
+        feed.innerHTML = `<div class="empty-state-social"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading feed</div></div>`;
+    }
+}
+
+async function showCircleInvite(circleId) {
+    const username = prompt('Enter the display name of the user to invite:');
+    if (!username) return;
+
+    try {
+        const { data: profile, error } = await supabase
+            .from('user_profiles')
+            .select('id, display_name')
+            .ilike('display_name', username)
+            .single();
+
+        if (error || !profile) {
+            showToast('User not found', 'error');
+            return;
+        }
+
+        const { data: circle } = await supabase
+            .from('style_circles')
+            .select('member_ids')
+            .eq('id', circleId)
+            .single();
+
+        const members = circle?.member_ids || [];
+        if (members.includes(profile.id)) {
+            showToast('User is already in the circle', 'info');
+            return;
+        }
+        if (members.length >= 8) {
+            showToast('Circle is full (max 8 members)', 'error');
+            return;
+        }
+
+        const { error: updateError } = await supabase
+            .from('style_circles')
+            .update({ member_ids: [...members, profile.id] })
+            .eq('id', circleId);
+
+        if (updateError) throw updateError;
+
+        showToast(`${profile.display_name} added to circle!`, 'success');
+        viewStyleCircle(circleId);
+    } catch (err) {
+        showToast('Error inviting member: ' + err.message, 'error');
+    }
+}
+
+async function removeMember(circleId, memberId) {
+    if (!confirm('Remove this member from the circle?')) return;
+
+    try {
+        const { data: circle } = await supabase
+            .from('style_circles')
+            .select('member_ids')
+            .eq('id', circleId)
+            .single();
+
+        const updated = (circle?.member_ids || []).filter(id => id !== memberId);
+
+        await supabase.from('style_circles').update({ member_ids: updated }).eq('id', circleId);
+        showToast('Member removed.', 'success');
+        viewStyleCircle(circleId);
+    } catch (err) {
+        showToast('Error removing member: ' + err.message, 'error');
+    }
+}
+
+async function leaveCircle(circleId) {
+    if (!confirm('Leave this circle?')) return;
+    await removeMember(circleId, state.user.id);
+    closeCircleModal();
+    loadStyleCircles();
+}
+
+async function deleteCircle(circleId) {
+    if (!confirm('Delete this circle permanently?')) return;
+
+    try {
+        await supabase.from('style_circles').delete().eq('id', circleId);
+        showToast('Circle deleted.', 'info');
+        closeCircleModal();
+        loadStyleCircles();
+    } catch (err) {
+        showToast('Error deleting circle: ' + err.message, 'error');
+    }
+}
+
+window.viewStyleCircle = viewStyleCircle;
+window.showCircleInvite = showCircleInvite;
+window.removeMember = removeMember;
+window.leaveCircle = leaveCircle;
+window.deleteCircle = deleteCircle;
+
+// ============================================================================
+// ANALYTICS DASHBOARD
+// ============================================================================
+
+async function loadAnalytics() {
+    const container = document.getElementById('analyticsContent');
+    if (!container) return;
+
+    container.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Loading analytics...</p></div>';
+
+    try {
+        const safeQuery = async (q) => { try { const r = await q; return r.error ? { data: [], count: 0 } : r; } catch { return { data: [], count: 0 }; } };
+
+        const [entriesRes, closetRes, tradesRes, pendingRes, profilesRes] = await Promise.all([
+            safeQuery(supabase.from('entries').select('created_at, user_id, status', { count: 'exact' })),
+            safeQuery(supabase.from('closet_items').select('created_at', { count: 'exact' })),
+            safeQuery(supabase.from('trade_requests').select('status, created_at')),
+            safeQuery(supabase.from('entries').select('id', { count: 'exact' }).eq('status', 'pending')),
+            safeQuery(supabase.from('user_profiles').select('id, display_name, style_score').order('style_score', { ascending: false }).limit(10))
+        ]);
+
+        const entries = entriesRes.data || [];
+        const totalEntries = entries.filter(e => e.status === 'published').length;
+        const totalCloset = closetRes.count || 0;
+        const trades = tradesRes.data || [];
+        const pendingCount = pendingRes.count || 0;
+        const leaderboard = profilesRes.data || [];
+
+        // Submissions by week (last 8 weeks)
+        const now = new Date();
+        const weekBuckets = Array.from({ length: 8 }, (_, i) => {
+            const start = new Date(now);
+            start.setDate(start.getDate() - (7 * (7 - i)));
+            const end = new Date(start);
+            end.setDate(end.getDate() + 7);
+            return { label: `W${i + 1}`, start, end, count: 0 };
+        });
+
+        entries.forEach(e => {
+            const d = new Date(e.created_at);
+            const bucket = weekBuckets.find(b => d >= b.start && d < b.end);
+            if (bucket) bucket.count++;
+        });
+
+        const maxWeekCount = Math.max(...weekBuckets.map(b => b.count), 1);
+
+        container.innerHTML = `
+            <div class="analytics-grid">
+                <div class="analytics-stat-card">
+                    <div class="analytics-stat-num">${totalEntries}</div>
+                    <div class="analytics-stat-label">Published Entries</div>
+                </div>
+                <div class="analytics-stat-card">
+                    <div class="analytics-stat-num">${totalCloset}</div>
+                    <div class="analytics-stat-label">Closet Items</div>
+                </div>
+                <div class="analytics-stat-card">
+                    <div class="analytics-stat-num">${trades.filter(t => t.status === 'accepted').length}</div>
+                    <div class="analytics-stat-label">Completed Trades</div>
+                </div>
+                <div class="analytics-stat-card highlight">
+                    <div class="analytics-stat-num">${pendingCount}</div>
+                    <div class="analytics-stat-label">Pending Review</div>
+                </div>
+            </div>
+
+            <div class="analytics-section">
+                <h3 class="analytics-section-title">Submissions (Last 8 Weeks)</h3>
+                <div class="analytics-bar-chart">
+                    ${weekBuckets.map(b => `
+                        <div class="analytics-bar-col">
+                            <div class="analytics-bar-fill" style="height:${Math.round((b.count / maxWeekCount) * 100)}%">
+                                <span class="analytics-bar-val">${b.count}</span>
+                            </div>
+                            <div class="analytics-bar-label">${b.label}</div>
+                        </div>`).join('')}
+                </div>
+            </div>
+
+            <div class="analytics-section">
+                <h3 class="analytics-section-title">Style Score Leaderboard</h3>
+                <div class="analytics-leaderboard">
+                    ${leaderboard.length === 0
+                        ? '<div class="empty-state-social"><div class="empty-icon">🏆</div><div class="empty-text">No scores yet</div></div>'
+                        : leaderboard.map((u, i) => `
+                            <div class="leaderboard-row">
+                                <span class="leaderboard-rank">${i + 1}</span>
+                                <span class="leaderboard-name">${u.display_name || 'User'}</span>
+                                <span class="leaderboard-score">${u.style_score || 0} pts</span>
+                            </div>`).join('')}
+                </div>
+            </div>
+
+            <div class="analytics-section">
+                <h3 class="analytics-section-title">Trade Activity</h3>
+                <div class="analytics-grid" style="grid-template-columns:repeat(3,1fr)">
+                    <div class="analytics-stat-card"><div class="analytics-stat-num">${trades.filter(t=>t.status==='pending').length}</div><div class="analytics-stat-label">Pending</div></div>
+                    <div class="analytics-stat-card"><div class="analytics-stat-num">${trades.filter(t=>t.status==='accepted').length}</div><div class="analytics-stat-label">Accepted</div></div>
+                    <div class="analytics-stat-card"><div class="analytics-stat-num">${trades.filter(t=>t.status==='rejected').length}</div><div class="analytics-stat-label">Declined</div></div>
+                </div>
+            </div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<div class="empty-state-social"><div class="empty-icon">⚠️</div><div class="empty-text">Error loading analytics: ${err.message}</div></div>`;
+    }
+}
 
 // ============================================================================
 // START APPLICATION
